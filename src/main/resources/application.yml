@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: account-upgrade-service
+  autoconfigure:
+    # Default profile uses the in-memory broker, so no Kafka connection is attempted.
+    # The "kafka" profile (application-kafka.yml) re-enables it.
+    exclude: org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration
+  mvc:
+    problemdetails:
+      enabled: true
+  lifecycle:
+    # Time the broker gets to drain queued events on shutdown.
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8080
+  # Finish in-flight HTTP requests before the broker stops (the broker stops after the web server).
+  shutdown: graceful
+
+upgrade:
+  eligibility:
+    min-age: 18
+    max-age: 23
+    min-balance: 30
+  ingestion:
+    max-request-size: 5MB
+  messaging:
+    partitions: 4
+    queue-capacity: 10000
+    max-attempts: 3
+    retry-backoff: 200ms
+    dead-letter-capacity: 1000
+  notification:
+    outbox-capacity: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

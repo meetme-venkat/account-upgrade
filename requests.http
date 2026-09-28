@@ -1,0 +1,49 @@
+### Batch ingestion (mix of eligible and ineligible users)
+POST http://localhost:8080/api/batch-upgrade
+Content-Type: application/json
+
+[
+  {"userId": "u100", "userName": "Alice", "age": 19, "balance": 120.50, "parentEmail": "alice.parent@example.com"},
+  {"userId": "u101", "userName": "Bob",   "age": 23, "balance": 30,     "parentEmail": null},
+  {"userId": "u102", "userName": "",      "age": 17, "balance": 12.75,  "parentEmail": "carl.parent@example.com"}
+]
+
+### Real-time ingestion (eligible)
+POST http://localhost:8080/api/realtime-upgrade
+Content-Type: application/json
+
+{"userId": "u200", "userName": "Dana", "age": 21, "balance": 45.00, "parentEmail": "dana.parent@example.com"}
+
+### Real-time ingestion (ineligible: age and balance)
+POST http://localhost:8080/api/realtime-upgrade
+Content-Type: application/json
+
+{"userId": "u201", "userName": "Evan", "age": 25, "balance": 29.99}
+
+### Idempotent real-time request: send it several times, it is processed and notified once
+POST http://localhost:8080/api/realtime-upgrade
+Content-Type: application/json
+Idempotency-Key: order-2026-0001
+
+{"userId": "u300", "userName": "Ivy", "age": 21, "balance": 80, "parentEmail": "ivy.parent@example.com"}
+
+### Operational metrics
+GET http://localhost:8080/actuator/metrics/upgrade.broker.pending
+
+### Invalid request (400: missing userId, bad parentEmail)
+POST http://localhost:8080/api/realtime-upgrade
+Content-Type: application/json
+
+{"userName": "NoId", "age": 20, "balance": 50, "parentEmail": "not-an-email"}
+
+### All processed requests
+GET http://localhost:8080/api/processed-upgrades
+
+### Filtered: ineligible only
+GET http://localhost:8080/api/processed-upgrades?status=INELIGIBLE
+
+### Filtered: one user
+GET http://localhost:8080/api/processed-upgrades?userId=u100
+
+### Simulated emails
+GET http://localhost:8080/api/notifications
