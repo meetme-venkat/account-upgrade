@@ -7,8 +7,8 @@
     2. Rolls the compose stack forward in order and waits for every health check (docker compose up --wait):
        the schema job (Liquibase) must complete successfully before the backend starts, and the backend must be
        healthy before the frontend starts. A failed schema job fails the release before any service is replaced.
-    3. Smoke tests the running release: a real request through the API, Kafka, PostgreSQL and the email outbox, and
-       the UI plus its /api proxy.
+    3. Smoke tests the running release: the API refuses a request without a token; logging in works; a real request
+       goes through the API, Kafka, PostgreSQL and the email outbox; the UI and its /api proxy work with the token.
     4. If any step fails, rolls back to the images that were running before, and exits non-zero.
 
     pipeline.ps1 runs it. It can also be run by hand, for example to roll back:
@@ -39,7 +39,12 @@ param(
     [int]$SmokeTimeoutSec = 90,
 
     # Older release images kept locally for fast rollback; the rest are removed.
-    [int]$KeepImages = 5
+    [int]$KeepImages = 5,
+
+    # Credentials the smoke test logs in with (the API needs an access token).
+    [string]$AdminUsername = $(if ($env:UPGRADE_SECURITY_ADMIN_USERNAME) { $env:UPGRADE_SECURITY_ADMIN_USERNAME } else { 'admin' }),
+
+    [string]$AdminPassword = $(if ($env:UPGRADE_SECURITY_ADMIN_PASSWORD) { $env:UPGRADE_SECURITY_ADMIN_PASSWORD } else { 'admin' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,8 +110,17 @@ function Start-Release([string]$Schema, [string]$Backend, [string]$Frontend) {
 
 # Invoke-RestMethod in 5.1 returns a JSON array as one object; unroll it. PowerShell unwraps a one-item array on
 # return, so callers wrap the result in @() again.
-function Get-Json([string]$Url) {
-    return @(Invoke-RestMethod -Uri $Url -TimeoutSec 10 | ForEach-Object { $_ })
+function Get-Json([string]$Url, [hashtable]$Headers = @{}) {
+    return @(Invoke-RestMethod -Uri $Url -Headers $Headers -TimeoutSec 10 | ForEach-Object { $_ })
+}
+
+# Status code of a request that is expected to fail (Invoke-WebRequest throws on 4xx in PowerShell 5.1).
+function Get-StatusCode([string]$Url) {
+    try { return [int](Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 10).StatusCode }
+    catch [System.Net.WebException] {
+        if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }
+        throw
+    }
 }
 
 function Test-Release {
@@ -116,15 +130,23 @@ function Test-Release {
     $ui = Invoke-WebRequest -Uri "$uiUrl/healthz" -UseBasicParsing -TimeoutSec 10
     if ($ui.StatusCode -ne 200) { throw "Frontend /healthz returned $($ui.StatusCode)" }
 
+    # The API is protected: no token, no data. Then log in as the UI does.
+    $anonymous = Get-StatusCode "$apiUrl/api/processed-upgrades"
+    if ($anonymous -ne 401) { throw "The API answered $anonymous to a request without an access token (expected 401)" }
+    $credentials = @{ username = $AdminUsername; password = $AdminPassword } | ConvertTo-Json
+    $login = Invoke-RestMethod -Method Post -Uri "$apiUrl/api/auth/login" -ContentType 'application/json' `
+        -Body $credentials -TimeoutSec 15
+    $auth = @{ Authorization = "Bearer $($login.accessToken)" }
+
     # Eligible request: must come back ELIGIBLE with its email delivered, i.e. the whole event pipeline works.
     $userId = 'deploy-smoke-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $body = @{ userId = $userId; userName = 'Deploy Smoke'; age = 20; balance = 50 } | ConvertTo-Json
     Invoke-RestMethod -Method Post -Uri "$apiUrl/api/realtime-upgrade" -ContentType 'application/json' `
-        -Body $body -TimeoutSec 15 | Out-Null
+        -Headers $auth -Body $body -TimeoutSec 15 | Out-Null
 
     $deadline = (Get-Date).AddSeconds($SmokeTimeoutSec)
     while ($true) {
-        $rows = @(Get-Json "$apiUrl/api/processed-upgrades?userId=$userId")
+        $rows = @(Get-Json "$apiUrl/api/processed-upgrades?userId=$userId" $auth)
         if ($rows.Count -gt 0 -and $rows[0].status -eq 'ELIGIBLE' -and $rows[0].notificationSent) { break }
         if ((Get-Date) -gt $deadline) {
             throw "Smoke request $userId was not processed and notified within $SmokeTimeoutSec s (last: $($rows | ConvertTo-Json -Compress))"
@@ -132,8 +154,8 @@ function Test-Release {
         Start-Sleep -Seconds 1
     }
 
-    # The UI's reverse proxy reaches the new backend.
-    $viaUi = @(Get-Json "$uiUrl/api/processed-upgrades?userId=$userId")
+    # The UI's reverse proxy reaches the new backend, passing the token on.
+    $viaUi = @(Get-Json "$uiUrl/api/processed-upgrades?userId=$userId" $auth)
     if ($viaUi.Count -ne 1) { throw "Frontend /api proxy did not return the smoke request" }
     Write-Host "Smoke test passed ($userId)"
 }

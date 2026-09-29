@@ -1,8 +1,9 @@
 import { Component, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { catchError, of, switchMap, timer } from 'rxjs';
 import { UpgradeApiService } from './core/api/upgrade-api.service';
+import { AuthService } from './core/auth/auth.service';
 
 const HEALTH_CHECK_MS = 10_000;
 
@@ -14,6 +15,8 @@ const HEALTH_CHECK_MS = 10_000;
 })
 export class App {
   private readonly api = inject(UpgradeApiService);
+  private readonly router = inject(Router);
+  protected readonly auth = inject(AuthService);
 
   /** Backend health: undefined while the first check runs. */
   protected readonly backendUp = toSignal(
@@ -21,4 +24,9 @@ export class App {
       switchMap(() => this.api.health().pipe(catchError(() => of(false)))),
     ),
   );
+
+  logout(): void {
+    this.auth.logout();
+    void this.router.navigate(['/login']);
+  }
 }

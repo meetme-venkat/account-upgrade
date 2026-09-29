@@ -91,6 +91,9 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
       UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR: "3"
       UPGRADE_MESSAGING_KAFKA_MIN_INSYNC_REPLICAS: "2"
+      # Signs the login tokens. The prod profile refuses the development key from application.yml, so this stack
+      # has its own; override with the environment variable for anything beyond local use.
+      UPGRADE_SECURITY_JWT_SECRET: ${UPGRADE_SECURITY_JWT_SECRET:-local-compose-jwt-signing-key-not-for-production}
     depends_on:
       account-update-db-schema:
         condition: service_completed_successfully

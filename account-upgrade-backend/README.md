@@ -38,6 +38,7 @@ Each package has a single responsibility and could be split into its own microse
 | `notification` | Builds the user and parent emails. The transactional outbox (`EmailSenderImpl`), the `OutboxRelay` that delivers them, and the `EmailChannel` port (log-only today) |
 | `persistence` | `ProcessedUpgradeRepository` port and its PostgreSQL adapter. The tables are created and migrated by the separate [`account-update-db-schema`](../account-update-db-schema) service (Liquibase), which is deployed first; this service never changes the schema |
 | `query` | Read API for processed requests |
+| `security` | Login (`POST /api/auth/login`), JWT issuing and validation for every `/api` call, 401/403 problem responses |
 | `guardrails`, `web` | Production guardrails, CORS, global error handling (RFC 9457 problem details) |
 
 ### Code conventions
@@ -144,15 +145,57 @@ The image runs the `prod` profile, which applies the [production guardrails](PRO
 | `UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR` / `_MIN_INSYNC_REPLICAS` | Topic durability (defaults 1 / 1 for a single dev broker). `prod` requires 3 / 2 |
 | `UPGRADE_GUARDRAILS_RATE_LIMIT_RPS` / `_BURST` / `_ENABLED` | Per-client rate limit on `/api/**` (defaults 20 / 40 / on) |
 | `UPGRADE_WEB_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call `/api/**` directly. Leave it empty (the default) when the frontend reaches the API through its reverse proxy |
+| `UPGRADE_SECURITY_JWT_SECRET` | Key that signs the access tokens (HMAC-SHA256), at least 32 bytes, e.g. `openssl rand -base64 48`. **Required in prod**: the prod profile refuses the development key |
+| `UPGRADE_SECURITY_ADMIN_USERNAME` / `_PASSWORD` | The administrator's login (default `admin` / `admin`; the prod profile logs a warning while the password is `admin`) |
+| `UPGRADE_SECURITY_JWT_TOKEN_TTL` | Access token lifetime (default `1h`, between 1 minute and 24 hours) |
 
 The UI lives in [`../account-upgrade-frontend`](../account-upgrade-frontend) and is deployed separately. The only link between the two is this REST API.
 
 ## API
 
+### Authentication
+
+Every `/api/**` call needs an access token, except the login itself. Log in with the administrator's credentials
+(`admin` / `admin` by default, see `UPGRADE_SECURITY_ADMIN_*`) to get one:
+
+```bash
+curl -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}'
+```
+
+Response `200 OK`:
+
+```json
+{"accessToken":"eyJhbGciOiJIUzI1NiJ9...","tokenType":"Bearer","expiresIn":3600,"expiresAt":"2026-09-29T15:16:35Z"}
+```
+
+Then send it with every request as `Authorization: Bearer <accessToken>`:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r .accessToken)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/processed-upgrades
+```
+
+- **The token** is a JWT signed with HMAC-SHA256 (`UPGRADE_SECURITY_JWT_SECRET`). It carries `iss`, `sub` (the user),
+  `iat`, `exp`, a unique `jti` and `scope=api`, and is valid for `upgrade.security.jwt.token-ttl` (1 hour).
+- **Validation:** the backend accepts a token only if it is signed with its key (HS256 only: `alg: none` and other
+  algorithms are rejected), unexpired (60 s clock skew), from its issuer, and has a subject and `scope=api`.
+- **Failures:**
+  - A missing, invalid or expired token gets `401` with `WWW-Authenticate: Bearer` and a problem body; log in again.
+  - A valid token without `scope=api` gets `403`.
+  - Wrong login credentials get one generic `401 Invalid username or password`, which doesn't say which part was
+    wrong.
+- **What stays public:** `POST /api/auth/login` and the actuator endpoints, which health probes and the UI's status
+  indicator use (the prod profile limits which actuator endpoints exist).
+- **Stateless:** no sessions or cookies, so there's nothing to share between instances. "Logging out" means
+  discarding the token.
+
 ### `POST /api/batch-upgrade`: batch ingestion
 
 ```bash
-curl -X POST http://localhost:8080/api/batch-upgrade -H "Content-Type: application/json" -d '[
+curl -X POST http://localhost:8080/api/batch-upgrade -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -d '[
   {"userId":"u100","userName":"Alice","age":19,"balance":120.50,"parentEmail":"alice.parent@example.com"},
   {"userId":"u101","userName":"Bob","age":23,"balance":30,"parentEmail":null},
   {"userId":"u102","userName":"","age":17,"balance":12.75,"parentEmail":"carl.parent@example.com"}
@@ -176,7 +219,7 @@ Response `202 Accepted`:
 
 ```bash
 curl -X POST http://localhost:8080/api/realtime-upgrade -H "Content-Type: application/json" \
-  -d '{"userId":"u200","userName":"Dana","age":25,"balance":29.99}'
+  -H "Authorization: Bearer $TOKEN" -d '{"userId":"u200","userName":"Dana","age":25,"balance":29.99}'
 ```
 
 Response `202 Accepted`:
@@ -237,6 +280,8 @@ More sample requests are in [`requests.http`](requests.http), which you can run 
 | `MessagingPropertiesTest` | Topic names from `application.yml`, environment overrides (the DLQ follows the main topic), and startup validation: missing, illegal or identical names |
 | `DeadLetterQueueIntegrationTest` *(IT)* | With the topic renamed for an environment, an unreadable event lands in that environment's `-dlq` queue on the real broker |
 | `ImplementationNamingConventionTest` | Every implementation of an application interface is a `<Name>Impl` in an `impl` package, and `impl` packages hold nothing else (see [Code conventions](#code-conventions)) |
+| `AuthenticationIntegrationTest` *(IT)* | Login returns a signed token with the expected claims that opens the API; wrong credentials get a generic 401 and are counted; missing, malformed, tampered, unsigned (`alg: none`), foreign-key, expired and foreign-issuer tokens get 401; a token without `scope=api` gets 403; health stays public |
+| `AuthPropertiesTest` | Signing key length, token lifetime bounds, required credentials, secrets never printed |
 | `UpgradeFlowIntegrationTest` *(IT)* | HTTP → Kafka → decision + outbox → relay → query, with `notificationSent` turning true after delivery; validation errors; `Idempotency-Key` retries; `413` for oversized bodies; the query limit |
 | `TransactionalProcessingTest` *(IT)* | **Two instances racing on one event commit one decision and one email per recipient**; a failed decision save rolls back the emails and the retry starts clean; redeliveries are skipped |
 | `UpgradeRequestHandlerImplConcurrencyTest` *(IT)* | 8 concurrent deliveries on one instance produce 1 record and 1 email; the claim is released after a failure so a retry can proceed |

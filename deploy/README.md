@@ -33,7 +33,7 @@ every 2 minutes (scheduled task, as you, while you're logged on)
 | The stack definition matches the images | The commit's own `docker-compose.yml` and `deploy.ps1` are used, and the images to build are read from that `docker-compose.yml` |
 | Schema before code | The schema job runs first on every deployment; the backend starts only if it exits 0, the frontend only once the backend is healthy. A failed migration replaces nothing and triggers the rollback |
 | One run at a time | A lock file, and the scheduled task never overlaps itself |
-| A bad release doesn't stay live | Health checks + smoke test (API → Kafka → PostgreSQL → email outbox, and the UI's `/api` proxy), automatic rollback |
+| A bad release doesn't stay live | Health checks + smoke test (the API refuses a request without a token; login as the administrator (`-AdminUsername` / `-AdminPassword`, or `UPGRADE_SECURITY_ADMIN_*`); API → Kafka → PostgreSQL → email outbox with the token; the UI's `/api` proxy), automatic rollback |
 | A broken commit isn't retried every 2 minutes | It is attempted once; the next push to `main`, or `-Force`, runs again |
 | Auditable | One log per run, a deployment history, and the current state (see below) |
 

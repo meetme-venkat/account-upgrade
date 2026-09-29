@@ -84,5 +84,9 @@ A. Ingest Request
    files or migration tool in the backend. Schema changes are new changesets in account-update-db-schema/changelog
    (never edit an applied one), each with a --rollback, backward compatible with the running backend (expand, then
    contract). Deployment order: account-update-db-schema (job, must exit 0) -> backend (healthy) -> frontend.
+   Authentication: POST /api/auth/login (admin/admin by default, UPGRADE_SECURITY_ADMIN_*) returns a JWT (HS256,
+   UPGRADE_SECURITY_JWT_SECRET); every other /api call needs Authorization: Bearer <token>, validated by the backend
+   (signature, expiry, issuer, scope=api). The frontend's login page, route guard and auth interceptor handle it;
+   tests use real tokens (PostgresContainerSupport.authorized), never a disabled security chain.
 
  

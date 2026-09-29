@@ -20,7 +20,7 @@ Deployment order:  account-update-db-schema (Liquibase, exits 0) ──► backe
 ## Run with Docker (everything)
 
 ```bash
-docker compose up --build         # UI http://localhost:4200, API http://localhost:8080
+docker compose up --build         # UI http://localhost:4200 (sign in as admin / admin), API http://localhost:8080
 ```
 
 This starts PostgreSQL and a 3-broker Kafka cluster, then the schema job, then the backend (prod profile) once the schema is up to date, then the frontend once the backend is healthy.
