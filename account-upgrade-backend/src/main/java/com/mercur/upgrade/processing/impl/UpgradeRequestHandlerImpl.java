@@ -1,4 +1,4 @@
-package com.mercur.upgrade.processing;
+package com.mercur.upgrade.processing.impl;
 
 import com.mercur.upgrade.common.UpgradeRequestedEvent;
 import com.mercur.upgrade.eligibility.EligibilityResult;
@@ -29,9 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * rebalance) finds the decision taken and rolls its own work back.
  */
 @Service
-public class UpgradeRequestProcessor implements UpgradeRequestHandler {
+public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(UpgradeRequestProcessor.class);
+    private static final Logger log = LoggerFactory.getLogger(UpgradeRequestHandlerImpl.class);
 
     private final EligibilityService eligibilityService;
     private final NotificationService notificationService;
@@ -41,7 +41,7 @@ public class UpgradeRequestProcessor implements UpgradeRequestHandler {
     /** Event ids currently being processed; bounded by the number of consumer threads. */
     private final Set<String> inProgress = ConcurrentHashMap.newKeySet();
 
-    public UpgradeRequestProcessor(EligibilityService eligibilityService,
+    public UpgradeRequestHandlerImpl(EligibilityService eligibilityService,
                                    NotificationService notificationService,
                                    ProcessedUpgradeRepository repository,
                                    Clock clock,

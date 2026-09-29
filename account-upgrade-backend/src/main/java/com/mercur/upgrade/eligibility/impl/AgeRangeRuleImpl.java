@@ -1,4 +1,4 @@
-package com.mercur.upgrade.eligibility.rules;
+package com.mercur.upgrade.eligibility.impl;
 
 import com.mercur.upgrade.common.UpgradeRequest;
 import com.mercur.upgrade.eligibility.EligibilityProperties;
@@ -11,12 +11,12 @@ import java.util.Optional;
 /** User must be between {@code minAge} and {@code maxAge}, inclusive. */
 @Component
 @Order(2)
-public class AgeRangeRule implements EligibilityRule {
+public class AgeRangeRuleImpl implements EligibilityRule {
 
     private final int minAge;
     private final int maxAge;
 
-    public AgeRangeRule(EligibilityProperties properties) {
+    public AgeRangeRuleImpl(EligibilityProperties properties) {
         this.minAge = properties.minAge();
         this.maxAge = properties.maxAge();
     }

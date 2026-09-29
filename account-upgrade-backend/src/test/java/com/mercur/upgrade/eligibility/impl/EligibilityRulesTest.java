@@ -1,8 +1,6 @@
-package com.mercur.upgrade.eligibility;
+package com.mercur.upgrade.eligibility.impl;
 
-import com.mercur.upgrade.eligibility.rules.AgeRangeRule;
-import com.mercur.upgrade.eligibility.rules.MinimumBalanceRule;
-import com.mercur.upgrade.eligibility.rules.UserNameRule;
+import com.mercur.upgrade.eligibility.EligibilityProperties;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,7 +19,7 @@ class EligibilityRulesTest {
     @Nested
     class AgeRange {
 
-        private final AgeRangeRule rule = new AgeRangeRule(properties);
+        private final AgeRangeRuleImpl rule = new AgeRangeRuleImpl(properties);
 
         @ParameterizedTest
         @ValueSource(ints = {18, 20, 23})
@@ -45,7 +43,7 @@ class EligibilityRulesTest {
     @Nested
     class MinimumBalance {
 
-        private final MinimumBalanceRule rule = new MinimumBalanceRule(properties);
+        private final MinimumBalanceRuleImpl rule = new MinimumBalanceRuleImpl(properties);
 
         @ParameterizedTest
         @ValueSource(strings = {"30", "30.00", "30.01", "1000000"})
@@ -69,7 +67,7 @@ class EligibilityRulesTest {
     @Nested
     class UserName {
 
-        private final UserNameRule rule = new UserNameRule();
+        private final UserNameRuleImpl rule = new UserNameRuleImpl();
 
         @ParameterizedTest
         @NullAndEmptySource

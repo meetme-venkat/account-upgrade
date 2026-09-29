@@ -1,4 +1,4 @@
-package com.mercur.upgrade.messaging.kafka;
+package com.mercur.upgrade.messaging.kafka.impl;
 
 import com.mercur.upgrade.common.Topics;
 import com.mercur.upgrade.common.UpgradeRequestedEvent;
@@ -14,14 +14,14 @@ import java.util.concurrent.TimeoutException;
 
 /** Publishes upgrade events to Kafka. */
 @Component
-public class KafkaEventPublisher implements EventPublisher {
+public class EventPublisherImpl implements EventPublisher {
 
     private static final long SEND_TIMEOUT_SECONDS = 10;
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final JsonMapper jsonMapper;
 
-    public KafkaEventPublisher(KafkaTemplate<String, String> kafkaTemplate, JsonMapper jsonMapper) {
+    public EventPublisherImpl(KafkaTemplate<String, String> kafkaTemplate, JsonMapper jsonMapper) {
         this.kafkaTemplate = kafkaTemplate;
         this.jsonMapper = jsonMapper;
     }

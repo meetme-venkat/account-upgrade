@@ -1,4 +1,4 @@
-package com.mercur.upgrade.eligibility.rules;
+package com.mercur.upgrade.eligibility.impl;
 
 import com.mercur.upgrade.common.UpgradeRequest;
 import com.mercur.upgrade.eligibility.EligibilityRule;
@@ -10,7 +10,7 @@ import java.util.Optional;
 /** User name must be present and not blank. */
 @Component
 @Order(1)
-public class UserNameRule implements EligibilityRule {
+public class UserNameRuleImpl implements EligibilityRule {
 
     @Override
     public Optional<String> check(UpgradeRequest request) {

@@ -1,4 +1,4 @@
-package com.mercur.upgrade.processing;
+package com.mercur.upgrade.processing.impl;
 
 import com.mercur.upgrade.common.RequestSource;
 import com.mercur.upgrade.common.UpgradeRequestedEvent;
@@ -33,7 +33,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class UpgradeRequestProcessorTest {
+class UpgradeRequestHandlerImplTest {
 
     @Mock
     private EligibilityService eligibilityService;
@@ -44,11 +44,11 @@ class UpgradeRequestProcessorTest {
     @Mock
     private ProcessedUpgradeRepository repository;
 
-    private UpgradeRequestProcessor processor;
+    private UpgradeRequestHandlerImpl processor;
 
     @BeforeEach
     void setUp() {
-        processor = new UpgradeRequestProcessor(eligibilityService, notificationService, repository,
+        processor = new UpgradeRequestHandlerImpl(eligibilityService, notificationService, repository,
                 Clock.fixed(NOW, ZoneOffset.UTC), TransactionOperations.withoutTransaction());
     }
 

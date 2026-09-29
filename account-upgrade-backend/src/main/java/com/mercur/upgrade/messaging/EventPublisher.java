@@ -4,7 +4,7 @@ import com.mercur.upgrade.common.UpgradeRequestedEvent;
 
 /**
  * Producer side of the {@code upgrade-requests} topic, implemented by
- * {@link com.mercur.upgrade.messaging.kafka.KafkaEventPublisher}.
+ * {@link com.mercur.upgrade.messaging.kafka.impl.EventPublisherImpl}.
  */
 public interface EventPublisher {
 

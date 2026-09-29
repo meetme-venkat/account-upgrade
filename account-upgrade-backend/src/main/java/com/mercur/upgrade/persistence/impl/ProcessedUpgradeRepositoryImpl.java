@@ -1,6 +1,9 @@
-package com.mercur.upgrade.persistence;
+package com.mercur.upgrade.persistence.impl;
 
 import com.mercur.upgrade.common.RequestSource;
+import com.mercur.upgrade.persistence.ProcessedUpgrade;
+import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
+import com.mercur.upgrade.persistence.ProcessingStatus;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -25,7 +28,7 @@ import java.util.Map;
  * </ul>
  */
 @Repository
-public class JdbcProcessedUpgradeRepository implements ProcessedUpgradeRepository {
+public class ProcessedUpgradeRepositoryImpl implements ProcessedUpgradeRepository {
 
     private static final String SELECT = """
             SELECT p.seq, p.event_id, p.user_id, p.source, p.status, p.reasons, p.processed_at,
@@ -38,7 +41,7 @@ public class JdbcProcessedUpgradeRepository implements ProcessedUpgradeRepositor
     private final JsonMapper jsonMapper;
     private final RowMapper<ProcessedUpgrade> rowMapper;
 
-    public JdbcProcessedUpgradeRepository(JdbcClient jdbc, JsonMapper jsonMapper) {
+    public ProcessedUpgradeRepositoryImpl(JdbcClient jdbc, JsonMapper jsonMapper) {
         this.jdbc = jdbc;
         this.jsonMapper = jsonMapper;
         this.rowMapper = (rs, rowNum) -> new ProcessedUpgrade(

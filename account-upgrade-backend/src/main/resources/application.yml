@@ -31,7 +31,7 @@ spring:
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
-        # Bounded blocking: the producer gives up before KafkaEventPublisher stops waiting (10 s),
+        # Bounded blocking: the producer gives up before EventPublisherImpl stops waiting (10 s),
         # so a 503 means "not written" instead of "may still be written later".
         max.block.ms: 3000
         request.timeout.ms: 4000

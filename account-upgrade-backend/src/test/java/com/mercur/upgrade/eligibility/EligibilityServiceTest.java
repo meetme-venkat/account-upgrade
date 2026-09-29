@@ -1,9 +1,9 @@
 package com.mercur.upgrade.eligibility;
 
 import com.mercur.upgrade.common.UpgradeRequest;
-import com.mercur.upgrade.eligibility.rules.AgeRangeRule;
-import com.mercur.upgrade.eligibility.rules.MinimumBalanceRule;
-import com.mercur.upgrade.eligibility.rules.UserNameRule;
+import com.mercur.upgrade.eligibility.impl.AgeRangeRuleImpl;
+import com.mercur.upgrade.eligibility.impl.MinimumBalanceRuleImpl;
+import com.mercur.upgrade.eligibility.impl.UserNameRuleImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -57,7 +57,7 @@ class EligibilityServiceTest {
     void realRulesRejectRequestViolatingEveryConstraint() {
         EligibilityProperties properties = new EligibilityProperties(18, 23, new BigDecimal("30"));
         EligibilityService service = new EligibilityService(List.of(
-                new UserNameRule(), new AgeRangeRule(properties), new MinimumBalanceRule(properties)));
+                new UserNameRuleImpl(), new AgeRangeRuleImpl(properties), new MinimumBalanceRuleImpl(properties)));
 
         EligibilityResult result = service.evaluate(request("", 30, "10"));
 

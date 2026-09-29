@@ -1,4 +1,4 @@
-package com.mercur.upgrade.eligibility.rules;
+package com.mercur.upgrade.eligibility.impl;
 
 import com.mercur.upgrade.common.UpgradeRequest;
 import com.mercur.upgrade.eligibility.EligibilityProperties;
@@ -12,11 +12,11 @@ import java.util.Optional;
 /** Balance must be at least {@code minBalance}. */
 @Component
 @Order(3)
-public class MinimumBalanceRule implements EligibilityRule {
+public class MinimumBalanceRuleImpl implements EligibilityRule {
 
     private final BigDecimal minBalance;
 
-    public MinimumBalanceRule(EligibilityProperties properties) {
+    public MinimumBalanceRuleImpl(EligibilityProperties properties) {
         this.minBalance = properties.minBalance();
     }
 

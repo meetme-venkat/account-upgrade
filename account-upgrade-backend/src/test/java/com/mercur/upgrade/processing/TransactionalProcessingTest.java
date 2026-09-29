@@ -5,9 +5,10 @@ import com.mercur.upgrade.common.UpgradeRequestedEvent;
 import com.mercur.upgrade.eligibility.EligibilityService;
 import com.mercur.upgrade.notification.EmailSender;
 import com.mercur.upgrade.notification.NotificationService;
-import com.mercur.upgrade.notification.OutboxEmailSender;
+import com.mercur.upgrade.notification.impl.EmailSenderImpl;
 import com.mercur.upgrade.persistence.ProcessedUpgrade;
 import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
+import com.mercur.upgrade.processing.impl.UpgradeRequestHandlerImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -37,17 +38,17 @@ class TransactionalProcessingTest extends IntegrationTestSupport {
     @Autowired
     private ProcessedUpgradeRepository repository;
     @Autowired
-    private OutboxEmailSender outbox;
+    private EmailSenderImpl outbox;
     @Autowired
     private TransactionOperations transactions;
     @Autowired
     private Clock clock;
     @Autowired
-    private UpgradeRequestProcessor springProcessor;
+    private UpgradeRequestHandlerImpl springProcessor;
 
     /** A separate processor instance (its own in-memory claim), as on another server. */
-    private UpgradeRequestProcessor instance(EmailSender sender, ProcessedUpgradeRepository repo) {
-        return new UpgradeRequestProcessor(eligibilityService, new NotificationService(sender, clock), repo, clock,
+    private UpgradeRequestHandlerImpl instance(EmailSender sender, ProcessedUpgradeRepository repo) {
+        return new UpgradeRequestHandlerImpl(eligibilityService, new NotificationService(sender, clock), repo, clock,
                 transactions);
     }
 
@@ -80,8 +81,8 @@ class TransactionalProcessingTest extends IntegrationTestSupport {
                 outbox.send(message);
             }
         };
-        UpgradeRequestProcessor serverA = instance(barrierThenOutbox, repository);
-        UpgradeRequestProcessor serverB = instance(barrierThenOutbox, repository);
+        UpgradeRequestHandlerImpl serverA = instance(barrierThenOutbox, repository);
+        UpgradeRequestHandlerImpl serverB = instance(barrierThenOutbox, repository);
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {

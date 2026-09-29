@@ -2,7 +2,10 @@ package com.mercur.upgrade.persistence;
 
 import java.util.List;
 
-/** Storage port for processed requests, implemented by {@link JdbcProcessedUpgradeRepository}. */
+/**
+ * Storage port for processed requests, implemented by
+ * {@link com.mercur.upgrade.persistence.impl.ProcessedUpgradeRepositoryImpl}.
+ */
 public interface ProcessedUpgradeRepository {
 
     /**

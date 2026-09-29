@@ -13,8 +13,8 @@ Requirements
 2. Microservices Functionality
 A. Ingest Request
    Provide two REST endpoints:
-   1. POST /api/batch-upgrade: Accepts a list os user upgrade requests as JSON. Each request contains: userId, userName, age, balance, parentEmail(nullable), Mimics batch loading.
-   2. POST /api/realtime-upgrade: Accepts a single user upgrade request(same schema), mimics real-time events.
+   1. POST /api/batch-upgrade: Accepts a list os user upgrade requests as JSON. Each request contains: userId, userName, age, balance, parentEmail(nullable).
+   2. POST /api/realtime-upgrade: Accepts a single user upgrade request(same schema).
  Each request (in batch or real-time) is published as an event to a "upgrade-requests" Kafka topic for asynchronous processing.
       
     B: Eligibility Processing
@@ -42,7 +42,7 @@ A. Ingest Request
     E: Fetch Processed requests
      Provide REST endpoint GET /api/processed-upgrades that returns a list of all processed upgraded requests with all above fields.
 3. Deliverables
-   Running Spring Boot application (can run locally, no external infra required)
+   Running Spring Boot application
    REST API definitions for batch and real-time ingestion and processed requests retrieval.
    Kafka event simulation (use embedded or mock queue, no need for a true Kafka cluster).
    Eligibility Logic implemented with clear structure
@@ -62,5 +62,19 @@ A. Ingest Request
    Usage of asynchronous / event-driven patterns (Kafka or simulation)
    Unit test quality and coverage.
    Clear written instructions and sample requests.
+
+6. Code Conventions (enforced by ImplementationNamingConventionTest in the backend build)
+   Interfaces are the ports between modules (ProcessedUpgradeRepository, EventPublisher, EmailSender, EmailChannel,
+   NotificationLog, UpgradeRequestHandler, EligibilityRule). Other modules depend only on the interface.
+   A class that implements one of the application's own interfaces:
+      - is named <Name>Impl. The only implementation of an interface is named after it
+        (EmailSender -> EmailSenderImpl, ProcessedUpgradeRepository -> ProcessedUpgradeRepositoryImpl);
+        several implementations of one interface keep a descriptive name (AgeRangeRuleImpl, UserNameRuleImpl).
+      - lives in an "impl" package of its module (persistence.impl, notification.impl, messaging.kafka.impl,
+        processing.impl, eligibility.impl).
+   Nothing else goes in an impl package, and nothing else is named *Impl.
+   Classes implementing only framework interfaces (Spring, Kafka, servlet: CorsConfig, ProductionReadinessCheck,
+   filters) keep framework-style names. Test doubles are exempt.
+   Tests of an implementation mirror its package (e.g. persistence.impl.ProcessedUpgradeRepositoryImplTest).
 
  
