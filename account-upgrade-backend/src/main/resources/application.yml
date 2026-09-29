@@ -20,7 +20,7 @@ spring:
       # Consumer threads + outbox relay + HTTP requests. Check PostgreSQL max_connections against replicas x pool.
       maximum-pool-size: 10
       # Fail fast when the database is down instead of stalling consumer threads.
-      connection-timeout: 3s
+      connection-timeout: 3000 # milliseconds (HikariCP does not accept duration strings)
       # Backstop against lock waits (e.g. two instances racing on the same event) and runaway queries.
       connection-init-sql: SET lock_timeout = '5s'; SET statement_timeout = '10s'
 
