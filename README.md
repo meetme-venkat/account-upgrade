@@ -48,4 +48,8 @@ cd account-upgrade-frontend && npm test
 
 Each service documents and enforces its own: [backend](account-upgrade-backend/PRODUCTION_GUARDRAILS.md), [frontend](account-upgrade-frontend/PRODUCTION_GUARDRAILS.md). CI in `.github/workflows/` blocks merges that break them, and `.github/dependabot.yml` keeps dependencies current.
 
+## Continuous delivery
+
+Every push to `main` runs both CI workflows, builds and scans the images, publishes them to GHCR, and deploys them to Rancher Desktop through a self-hosted runner, with a smoke test and automatic rollback. Setup and operation: [deploy/README.md](deploy/README.md).
+
 See [the backend README](account-upgrade-backend/README.md) for API details and sample payloads, and [the frontend README](account-upgrade-frontend/README.md) for deployment settings.

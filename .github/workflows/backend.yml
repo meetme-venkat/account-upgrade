@@ -1,11 +1,10 @@
 # Production guardrail: the backend cannot merge unless tests, the coverage gate, the Maven
 # enforcer rules and the container build all pass. See account-upgrade-backend/PRODUCTION_GUARDRAILS.md.
+# On main it runs as the first gate of cd.yml (workflow_call), so a push is tested once, then built and deployed.
 name: backend
 
 on:
-  push:
-    branches: [main]
-    paths: ['account-upgrade-backend/**', '.github/workflows/backend.yml']
+  workflow_call:
   pull_request:
     paths: ['account-upgrade-backend/**', '.github/workflows/backend.yml']
 
