@@ -1,0 +1,140 @@
+<header class="page-header">
+  <h1>Processed upgrades</h1>
+  <p class="muted">Outcomes stored by the eligibility consumer, newest first.</p>
+</header>
+
+<div class="toolbar">
+  <label class="inline">
+    Status
+    <select [value]="statusFilter()" (change)="setStatus($any($event.target).value)">
+      <option value="">All</option>
+      <option value="ELIGIBLE">Eligible</option>
+      <option value="INELIGIBLE">Ineligible</option>
+    </select>
+  </label>
+  <label class="inline">
+    User ID
+    <input
+      type="search"
+      placeholder="Any user"
+      [value]="userIdFilter()"
+      (input)="userIdFilter.set($any($event.target).value)"
+    />
+  </label>
+  <label class="inline checkbox">
+    <input
+      type="checkbox"
+      [checked]="autoRefresh()"
+      (change)="autoRefresh.set($any($event.target).checked)"
+    />
+    Auto-refresh
+  </label>
+  <button type="button" class="btn-secondary" (click)="query.refresh()">Refresh</button>
+  @if (query.lastUpdated(); as updated) {
+    <span class="muted small">Updated {{ updated | date: 'mediumTime' }}</span>
+  }
+</div>
+
+<app-error-panel [error]="query.error()" />
+
+<div class="stats">
+  <div class="stat">
+    <span class="stat-value">{{ stats().total }}</span
+    ><span class="stat-label">Shown</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value ok">{{ stats().eligible }}</span
+    ><span class="stat-label">Eligible</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value bad">{{ stats().ineligible }}</span
+    ><span class="stat-label">Ineligible</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value warn">{{ stats().notificationFailed }}</span>
+    <span class="stat-label">Notification failed</span>
+  </div>
+</div>
+
+<section class="card flush">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Status</th>
+          <th>Reasons</th>
+          <th>Notified</th>
+          <th>Source</th>
+          <th>Processed at</th>
+          <th>Event ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (item of pageItems(); track item.eventId) {
+          <tr>
+            <td>{{ item.userId }}</td>
+            <td>
+              <span
+                class="badge"
+                [class.badge-ok]="item.status === 'ELIGIBLE'"
+                [class.badge-bad]="item.status === 'INELIGIBLE'"
+                >{{ item.status }}</span
+              >
+            </td>
+            <td>
+              @if (item.reasons.length) {
+                <ul class="reasons">
+                  @for (reason of item.reasons; track $index) {
+                    <li>{{ reason }}</li>
+                  }
+                </ul>
+              } @else {
+                <span class="muted">None</span>
+              }
+            </td>
+            <td>
+              <span
+                class="badge"
+                [class.badge-ok]="item.notificationSent"
+                [class.badge-warn]="!item.notificationSent"
+                >{{ item.notificationSent ? 'Yes' : 'No' }}</span
+              >
+            </td>
+            <td>{{ item.source }}</td>
+            <td class="nowrap">{{ item.processedAt | date: 'medium' }}</td>
+            <td class="mono small">{{ item.eventId }}</td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="7" class="muted center">
+              {{ query.data() === undefined ? 'Loading...' : 'No processed requests yet.' }}
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</section>
+
+@if (pageCount() > 1) {
+  <div class="pager">
+    <button
+      type="button"
+      class="btn-secondary"
+      [disabled]="page() === 0"
+      (click)="page.set(page() - 1)"
+    >
+      Previous
+    </button>
+    <span class="muted">Page {{ page() + 1 }} of {{ pageCount() }}</span>
+    <button
+      type="button"
+      class="btn-secondary"
+      [disabled]="page() + 1 >= pageCount()"
+      (click)="page.set(page() + 1)"
+    >
+      Next
+    </button>
+  </div>
+}

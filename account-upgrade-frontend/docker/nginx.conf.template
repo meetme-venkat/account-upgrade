@@ -1,0 +1,106 @@
+# Rendered by the nginx image's envsubst step at container start. See PRODUCTION_GUARDRAILS.md.
+# Files in conf.d are included inside the http {} block, so http-level directives are allowed here.
+
+server_tokens off;
+
+# Guardrail: per-client rate limit on the API proxy (defence in depth; the backend limits too).
+limit_req_zone $binary_remote_addr zone=api:10m rate=${API_RATE_LIMIT_RPS}r/s;
+limit_req_status 429;
+
+# Cache policy per path. Kept in a map so no location needs its own add_header: in nginx, any
+# add_header inside a location silently drops every add_header inherited from the server block.
+map $uri $cache_control {
+    default                              "no-cache";
+    /config.json                         "no-store";
+    ~^/api/                              "";
+    ~*\.(?:js|css|woff2?|ico|png|svg)$   "public, max-age=31536000, immutable";
+}
+
+log_format with_request_id '$remote_addr - [$time_local] "$request" $status $body_bytes_sent '
+                           '$request_time rid=$request_id ua="$http_user_agent"';
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    access_log /dev/stdout with_request_id;
+
+    # Resolve BACKEND_URL per request so the frontend starts even when the backend is not up yet.
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+    set $backend "${BACKEND_URL}";
+
+    # Guardrail: slow-client and body limits.
+    client_max_body_size 5m;
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    keepalive_timeout 30s;
+    send_timeout 30s;
+
+    # Guardrail: browser security headers, on every response including errors.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ${CSP_CONNECT_SRC}; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    # Empty (not sent) unless HSTS_VALUE is set; only set it when the site is served over HTTPS.
+    add_header Strict-Transport-Security "${HSTS_VALUE}" always;
+    add_header Cache-Control $cache_control always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Never serve dotfiles (.git, .env, ...) should any end up in the image.
+    location ~ /\. {
+        deny all;
+    }
+
+    location /api/ {
+        limit_except GET POST {
+            deny all;
+        }
+        limit_req zone=api burst=${API_RATE_LIMIT_BURST} nodelay;
+
+        proxy_pass $backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Same id in this access log and in the backend's logs.
+        proxy_set_header X-Request-Id $request_id;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+
+        # nginx's own security headers above are the single source; drop the backend's duplicates.
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+    }
+
+    location = /actuator/health {
+        limit_except GET {
+            deny all;
+        }
+        proxy_pass $backend;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 5s;
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+    }
+
+    # Hashed bundles: a missing asset is a 404, not index.html.
+    location ~* \.(?:js|css|woff2?|ico|png|svg)$ {
+        try_files $uri =404;
+    }
+
+    # SPA routes fall back to index.html.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

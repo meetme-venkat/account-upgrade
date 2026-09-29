@@ -1,0 +1,89 @@
+# Needs PostgreSQL and Kafka, and has no built-in addresses for them:
+#  - deployed: set SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD and SPRING_KAFKA_BOOTSTRAP_SERVERS
+#    (plus SPRING_KAFKA_SECURITY_PROTOCOL=SSL for Amazon MSK with TLS);
+#  - from source: `spring-boot:run` starts the containers in docker-compose.yml and connects to them;
+#  - tests: Testcontainers provides both.
+# Every other setting can be overridden the same way (e.g. UPGRADE_MESSAGING_PARTITIONS).
+spring:
+  application:
+    name: account-upgrade-service
+  mvc:
+    problemdetails:
+      enabled: true
+  lifecycle:
+    # Time each lifecycle phase (web server, Kafka listeners) gets to finish on shutdown.
+    timeout-per-shutdown-phase: 30s
+
+  # Processed requests and the notification outbox. Schema is managed by Flyway (db/migration).
+  datasource:
+    hikari:
+      # Consumer threads + outbox relay + HTTP requests. Check PostgreSQL max_connections against replicas x pool.
+      maximum-pool-size: 10
+      # Fail fast when the database is down instead of stalling consumer threads.
+      connection-timeout: 3s
+      # Backstop against lock waits (e.g. two instances racing on the same event) and runaway queries.
+      connection-init-sql: SET lock_timeout = '5s'; SET statement_timeout = '10s'
+
+  kafka:
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        # Bounded blocking: the producer gives up before KafkaEventPublisher stops waiting (10 s),
+        # so a 503 means "not written" instead of "may still be written later".
+        max.block.ms: 3000
+        request.timeout.ms: 4000
+        delivery.timeout.ms: 9000
+    listener:
+      # Commit each record's offset right after it is processed: a crash redelivers at most one record.
+      ack-mode: record
+    consumer:
+      group-id: upgrade-eligibility
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+server:
+  port: 8080
+  # Finish in-flight HTTP requests (and their Kafka publishes) before shutting down.
+  shutdown: graceful
+
+upgrade:
+  eligibility:
+    min-age: 18
+    max-age: 23
+    min-balance: 30
+  ingestion:
+    max-request-size: 5MB
+  messaging:
+    # Topic partitions: at least (max instances x consumer-concurrency). Partitions can only grow later.
+    partitions: 4
+    kafka:
+      consumer-concurrency: 4
+      # 1/1 suits a single development broker; production needs 3/2 (enforced by the prod profile).
+      replication-factor: 1
+      min-insync-replicas: 1
+  notification:
+    # Emails shown by GET /api/notifications.
+    outbox-capacity: 1000
+    relay:
+      # How often each instance polls the outbox, and how many rows it claims per poll.
+      interval: 500ms
+      batch-size: 20
+      max-attempts: 8
+      retention: 7d
+  web:
+    cors:
+      # Origins allowed to call /api directly from a browser (comma-separated).
+      # Leave empty when the frontend proxies /api, as account-upgrade-frontend does.
+      allowed-origins: ${UPGRADE_WEB_CORS_ALLOWED_ORIGINS:}
+
+# The database is deliberately NOT part of the readiness group: an RDS blip must not take every instance
+# out of the load balancer (ingestion only needs Kafka). Consumers retry instead.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

@@ -1,0 +1,63 @@
+<header class="page-header">
+  <h1>Notifications</h1>
+  <p class="muted">
+    Simulated emails from the backend's mock outbox, newest first. The backend keeps the most recent
+    1,000.
+  </p>
+</header>
+
+<div class="toolbar">
+  <label class="inline">
+    Recipient
+    <select [value]="role()" (change)="setRole($any($event.target).value)">
+      <option value="">All</option>
+      <option value="USER">User</option>
+      <option value="PARENT">Parent</option>
+    </select>
+  </label>
+  <label class="inline">
+    Search
+    <input
+      type="search"
+      placeholder="Recipient, subject or text"
+      [value]="search()"
+      (input)="search.set($any($event.target).value)"
+    />
+  </label>
+  <label class="inline checkbox">
+    <input
+      type="checkbox"
+      [checked]="autoRefresh()"
+      (change)="autoRefresh.set($any($event.target).checked)"
+    />
+    Auto-refresh
+  </label>
+  <button type="button" class="btn-secondary" (click)="query.refresh()">Refresh</button>
+  <span class="muted small">{{ messages().length }} shown</span>
+</div>
+
+<app-error-panel [error]="query.error()" />
+
+<div class="message-list">
+  @for (message of messages(); track $index) {
+    <article class="card message">
+      <div class="message-meta">
+        <span
+          class="badge"
+          [class.badge-info]="message.role === 'USER'"
+          [class.badge-neutral]="message.role === 'PARENT'"
+          >{{ message.role }}</span
+        >
+        <strong>{{ message.recipient }}</strong>
+        <span class="muted small">{{ message.createdAt | date: 'medium' }}</span>
+      </div>
+      <h3>{{ message.subject }}</h3>
+      <p class="message-body">{{ message.body }}</p>
+      <div class="muted small mono">event {{ message.eventId }}</div>
+    </article>
+  } @empty {
+    <div class="card muted center">
+      {{ query.data() === undefined ? 'Loading...' : 'No notifications match.' }}
+    </div>
+  }
+</div>

@@ -1,0 +1,70 @@
+# Production guardrail: the frontend cannot merge unless formatting, tests with coverage gate,
+# the budgeted production build, the dependency audit and the container build all pass.
+# See account-upgrade-frontend/PRODUCTION_GUARDRAILS.md.
+name: frontend
+
+on:
+  push:
+    branches: [main]
+    paths: ['account-upgrade-frontend/**', '.github/workflows/frontend.yml']
+  pull_request:
+    paths: ['account-upgrade-frontend/**', '.github/workflows/frontend.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: account-upgrade-frontend
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: account-upgrade-frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: account-upgrade-frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Format, tests + coverage gate, budgeted build, dependency audit
+        run: npm run verify
+      - name: Coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: account-upgrade-frontend/coverage
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t account-upgrade-frontend:ci .
+      - name: Invalid configuration fails fast
+        run: |
+          if docker run --rm -e POLL_INTERVAL_MS=10 account-upgrade-frontend:ci > startup.log 2>&1; then
+            echo "Expected startup to fail"; exit 1
+          fi
+          grep -q "POLL_INTERVAL_MS must be at least 1000" startup.log
+      - name: Serves the app with security headers, as a non-root user
+        run: |
+          docker run -d --name frontend -p 4200:8080 -e BACKEND_URL=http://127.0.0.1:9 account-upgrade-frontend:ci
+          for i in $(seq 1 30); do curl -fs http://localhost:4200/healthz && break; sleep 1; done
+          curl -fsI http://localhost:4200/processed | tee headers.txt
+          grep -qi "content-security-policy: default-src 'self'" headers.txt
+          grep -qi "x-frame-options: DENY" headers.txt
+          grep -qi "x-content-type-options: nosniff" headers.txt
+          ! grep -qi "strict-transport-security" headers.txt
+          curl -fsI http://localhost:4200/main-does-not-exist.js && exit 1 || true
+          test "$(docker exec frontend id -u)" = "101"
+          curl -fs http://localhost:4200/config.json | grep -q '"pollIntervalMs": 3000'
