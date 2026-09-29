@@ -5,6 +5,9 @@
 # the machine. Kafka must advertise a fixed address to clients, hence the fixed host port 9092.
 # A single broker means replication factor 1: fine for development, refused by the prod profile
 # (the root docker-compose.yml runs a production-shaped 3-broker cluster).
+# The schema comes from the account-update-db-schema service (Liquibase): it runs once PostgreSQL is healthy,
+# brings the schema up to date and exits. Kafka waits for it, so `docker compose up --wait` (what Spring Boot
+# runs) only returns once the schema is in place: `--wait` alone does not wait for a one-shot job to finish.
 services:
   postgres:
     image: postgres:16
@@ -20,8 +23,25 @@ services:
       timeout: 5s
       retries: 10
 
+  account-update-db-schema:
+    build: ../account-update-db-schema
+    image: account-update-db-schema:dev
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/account_upgrade
+      LIQUIBASE_COMMAND_USERNAME: postgres
+      LIQUIBASE_COMMAND_PASSWORD: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      # A one-shot job, not a service the application connects to.
+      org.springframework.boot.ignore: "true"
+
   kafka:
     image: apache/kafka:3.9.1
+    depends_on:
+      account-update-db-schema:
+        condition: service_completed_successfully
     ports:
       - "9092:9092"
     environment:

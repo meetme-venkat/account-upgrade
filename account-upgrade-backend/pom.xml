@@ -22,6 +22,8 @@
         <!-- Security: Spring Boot 4.1.1 manages Tomcat 11.0.24, which has critical CVEs fixed in 11.0.25
              (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525). Remove once the Boot version manages >= 11.0.25. -->
         <tomcat.version>11.0.26</tomcat.version>
+        <!-- Same Liquibase as the account-update-db-schema image (liquibase/liquibase:5.0.4); used by the tests. -->
+        <liquibase.version>5.0.4</liquibase.version>
         <!-- Set by the JaCoCo agent; empty default keeps surefire's @{argLine} valid when JaCoCo is skipped. -->
         <argLine/>
         <!-- Build guardrail: `mvn verify` fails below these coverage ratios. -->
@@ -47,18 +49,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-kafka</artifactId>
         </dependency>
-        <!-- Storage for processed requests and the notification outbox; schema managed by Flyway. -->
+        <!-- Storage for processed requests and the notification outbox. The schema is owned and migrated by the
+             separate account-update-db-schema service (Liquibase), deployed before this one. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-flyway</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -102,6 +97,13 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Tests only: applies the schema service's changelog (../account-update-db-schema) to the test database,
+             so tests run against exactly the schema that gets deployed. -->
+        <dependency>
+            <groupId>org.liquibase</groupId>
+            <artifactId>liquibase-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

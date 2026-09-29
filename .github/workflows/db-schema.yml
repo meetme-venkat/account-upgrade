@@ -1,0 +1,84 @@
+# Production guardrail: the database schema service cannot merge unless its image builds and its changelog
+# applies cleanly, is idempotent, rolls back completely, and adopts a database created by the former Flyway
+# migration. See account-update-db-schema/README.md.
+# On main it runs as a gate of publish.yml (workflow_call).
+name: db-schema
+
+on:
+  workflow_call:
+  pull_request:
+    paths: ['account-update-db-schema/**', '.github/workflows/db-schema.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-schema-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE: account-update-db-schema:ci
+      NETWORK: schema-ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The adoption test replays the former Flyway migration from history.
+          fetch-depth: 0
+
+      - name: Build image
+        run: docker build -t "$IMAGE" account-update-db-schema
+
+      - name: Start PostgreSQL
+        run: |
+          docker network create "$NETWORK"
+          for db in fresh adopted; do
+            docker run -d --name "pg-$db" --network "$NETWORK" \
+              -e POSTGRES_DB=account_upgrade -e POSTGRES_PASSWORD=ci postgres:16
+          done
+          for db in fresh adopted; do
+            for _ in $(seq 1 30); do docker exec "pg-$db" pg_isready -U postgres -q && break; sleep 1; done
+          done
+          sleep 2
+
+      - name: Changelog applies to an empty database, and a second run changes nothing
+        run: |
+          liquibase() { docker run --rm --network "$NETWORK" -e LIQUIBASE_COMMAND_URL=jdbc:postgresql://pg-fresh:5432/account_upgrade \
+            -e LIQUIBASE_COMMAND_USERNAME=postgres -e LIQUIBASE_COMMAND_PASSWORD=ci "$IMAGE" "$@"; }
+          liquibase update | tee first.log
+          grep -q 'Run: *[1-9]' first.log
+          liquibase update | tee second.log
+          grep -q 'Run: *0' second.log
+          docker exec pg-fresh psql -U postgres -d account_upgrade -tAc \
+            "select count(*) from pg_tables where schemaname = 'public' and tablename in ('processed_upgrades', 'notification_outbox')" | grep -qx 2
+
+      - name: Every changeset rolls back, and the changelog re-applies afterwards
+        run: |
+          liquibase() { docker run --rm --network "$NETWORK" -e LIQUIBASE_COMMAND_URL=jdbc:postgresql://pg-fresh:5432/account_upgrade \
+            -e LIQUIBASE_COMMAND_USERNAME=postgres -e LIQUIBASE_COMMAND_PASSWORD=ci "$IMAGE" "$@"; }
+          count=$(docker exec pg-fresh psql -U postgres -d account_upgrade -tAc "select count(*) from databasechangelog")
+          liquibase rollback-count --count="$count"
+          docker exec pg-fresh psql -U postgres -d account_upgrade -tAc \
+            "select count(*) from pg_tables where schemaname = 'public' and tablename not like 'databasechangelog%'" | grep -qx 0
+          liquibase update
+
+      - name: A database created by the former Flyway migration is adopted, data intact
+        run: |
+          git show 0455394b328de105e52f55758da91ca9635ee1e5:account-upgrade-backend/src/main/resources/db/migration/V1__processed_upgrades_and_outbox.sql \
+            | docker exec -i pg-adopted psql -v ON_ERROR_STOP=1 -q -U postgres -d account_upgrade
+          docker exec pg-adopted psql -U postgres -d account_upgrade -qc \
+            "insert into processed_upgrades (event_id, user_id, source, status, reasons, processed_at) values ('e1', 'u1', 'BATCH', 'ELIGIBLE', '[]', now())"
+          docker run --rm --network "$NETWORK" -e LIQUIBASE_COMMAND_URL=jdbc:postgresql://pg-adopted:5432/account_upgrade \
+            -e LIQUIBASE_COMMAND_USERNAME=postgres -e LIQUIBASE_COMMAND_PASSWORD=ci "$IMAGE" update
+          docker exec pg-adopted psql -U postgres -d account_upgrade -tAc \
+            "select count(*) from databasechangelog where exectype <> 'MARK_RAN'" | grep -qx 0
+          docker exec pg-adopted psql -U postgres -d account_upgrade -tAc "select count(*) from processed_upgrades" | grep -qx 1
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: |
+          docker rm -f pg-fresh pg-adopted || true
+          docker network rm "$NETWORK" || true

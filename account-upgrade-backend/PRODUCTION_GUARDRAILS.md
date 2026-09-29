@@ -37,6 +37,7 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 | Database timeouts | Pool connection timeout 3 s, `lock_timeout` 5 s, `statement_timeout` 10 s. The DB is not part of readiness, so an RDS blip doesn't pull every instance out of the load balancer | `application.yml` | – |
 | Bounded query | `GET /api/processed-upgrades` returns at most the newest `limit` records (default 1000, max 5000), filtered in SQL | `ProcessedUpgradeController` | – |
 | Graceful shutdown | In-flight HTTP requests and their publishes finish; consumers stop after their current record. Accepted events are already durable in Kafka | `server.shutdown: graceful` | `spring.lifecycle.timeout-per-shutdown-phase` |
+| Schema before code | The schema is owned by the `account-update-db-schema` service (Liquibase), which runs first on every deployment. This service starts only after it exited 0 and never changes the schema itself; a failed migration starts nothing and triggers the rollback | `docker-compose.yml` `depends_on: service_completed_successfully`, `deploy.ps1` | – |
 
 ## 3. Security hardening
 

@@ -3,15 +3,18 @@
     Deploys one release of the Account Upgrade platform to the local Docker engine (Rancher Desktop, dockerd/moby).
 
 .DESCRIPTION
-    1. Pulls the backend and frontend images tagged with the release (commit SHA).
-    2. Rolls the compose stack forward and waits for every health check (docker compose up --wait).
+    1. Pulls the database schema, backend and frontend images tagged with the release (commit SHA).
+    2. Rolls the compose stack forward in order and waits for every health check (docker compose up --wait):
+       the schema job (Liquibase) must complete successfully before the backend starts, and the backend must be
+       healthy before the frontend starts. A failed schema job fails the release before any service is replaced.
     3. Smoke tests the running release: a real request through the API, Kafka, PostgreSQL and the email outbox, and
        the UI plus its /api proxy.
     4. If any step fails, rolls back to the images that were running before, and exits non-zero.
 
-    The "cd" workflow runs it on the self-hosted runner. It can also be run by hand, for example to roll back:
+    pipeline.ps1 runs it. It can also be run by hand, for example to roll back:
         powershell -NoProfile -ExecutionPolicy Bypass -File deploy\deploy.ps1 -Tag <commit sha>
     Locally built images, without a registry:
+        docker build -t local/account-update-db-schema:dev account-update-db-schema
         docker build -t local/account-upgrade-backend:dev account-upgrade-backend
         docker build -t local/account-upgrade-frontend:dev account-upgrade-frontend
         powershell -NoProfile -ExecutionPolicy Bypass -File deploy\deploy.ps1 -Tag dev -Registry local -SkipPull
@@ -44,6 +47,7 @@ Set-StrictMode -Version Latest
 
 $composeFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'docker-compose.yml'
 $compose = @('compose', '-p', $ProjectName, '-f', $composeFile)
+$schemaImage = "$Registry/account-update-db-schema:$Tag"
 $backendImage = "$Registry/account-upgrade-backend:$Tag"
 $frontendImage = "$Registry/account-upgrade-frontend:$Tag"
 # 127.0.0.1, not localhost: on Windows localhost resolves to ::1 first, which WSL's relay can hold without forwarding.
@@ -70,8 +74,9 @@ function Get-DockerOutput {
     return $out
 }
 
+# The image of the service's current container, running or not (the schema job exits once it is done).
 function Get-RunningImage([string]$Service) {
-    $id = Get-DockerOutput @compose ps -q $Service | Select-Object -First 1
+    $id = Get-DockerOutput @compose ps -a -q $Service | Select-Object -First 1
     if (-not $id) { return $null }
     return Get-DockerOutput inspect --format '{{.Config.Image}}' $id
 }
@@ -91,7 +96,8 @@ function Assert-PortsFree {
     }
 }
 
-function Start-Release([string]$Backend, [string]$Frontend) {
+function Start-Release([string]$Schema, [string]$Backend, [string]$Frontend) {
+    $env:DB_SCHEMA_IMAGE = $Schema
     $env:BACKEND_IMAGE = $Backend
     $env:FRONTEND_IMAGE = $Frontend
     Invoke-Docker @compose up -d --no-build --remove-orphans --wait --wait-timeout $WaitTimeoutSec
@@ -133,7 +139,7 @@ function Test-Release {
 }
 
 function Remove-OldImages([string[]]$Keep) {
-    foreach ($repo in "$Registry/account-upgrade-backend", "$Registry/account-upgrade-frontend") {
+    foreach ($repo in "$Registry/account-update-db-schema", "$Registry/account-upgrade-backend", "$Registry/account-upgrade-frontend") {
         # Newest first.
         @(Get-DockerOutput images $repo --format '{{.Repository}}:{{.Tag}}') |
             Where-Object { $_ -and $_ -notmatch ':<none>$' -and $Keep -notcontains $_ } |
@@ -152,6 +158,7 @@ function Write-Record([string]$Result, [string]$Detail) {
             "### Deployment: $Result", '',
             "| | |", "|---|---|",
             "| Release | ``$Tag`` |",
+            "| Database schema | ``$schemaImage`` |",
             "| Backend | ``$backendImage`` |",
             "| Frontend | ``$frontendImage`` |",
             "| Detail | $Detail |")
@@ -161,6 +168,10 @@ function Write-Record([string]$Result, [string]$Detail) {
 Write-Step "Deploying release $Tag to project '$ProjectName'"
 Invoke-Docker version --format 'Docker engine {{.Server.Version}}'
 
+# Schema changes only go forward: rolling back re-runs the previous schema image, which finds nothing to do.
+# A stack deployed before the schema service existed has no previous schema image; the new one is used then.
+$previousSchema = Get-RunningImage 'account-update-db-schema'
+if (-not $previousSchema) { $previousSchema = $schemaImage }
 $previousBackend = Get-RunningImage 'account-upgrade-backend'
 $previousFrontend = Get-RunningImage 'account-upgrade-frontend'
 if ($previousBackend) { Write-Host "Currently running: $previousBackend, $previousFrontend" }
@@ -170,13 +181,14 @@ Assert-PortsFree
 
 if (-not $SkipPull) {
     Write-Step 'Pulling images'
+    Invoke-Docker pull $schemaImage
     Invoke-Docker pull $backendImage
     Invoke-Docker pull $frontendImage
 }
 
 try {
     Write-Step 'Rolling out and waiting for health checks'
-    Start-Release $backendImage $frontendImage
+    Start-Release $schemaImage $backendImage $frontendImage
     Write-Step 'Smoke testing'
     Test-Release
 }
@@ -185,7 +197,7 @@ catch {
     Write-Host "::error::Release $Tag failed: $failure"
     Write-Step 'Recent logs'
     $ErrorActionPreference = 'Continue'
-    & docker @compose logs --tail 100 account-upgrade-backend account-upgrade-frontend | Out-Host
+    & docker @compose logs --tail 100 account-update-db-schema account-upgrade-backend account-upgrade-frontend | Out-Host
     $ErrorActionPreference = 'Stop'
 
     $canRollBack = $previousBackend -and $previousFrontend -and
@@ -196,7 +208,7 @@ catch {
     }
     Write-Step "Rolling back to $previousBackend, $previousFrontend"
     try {
-        Start-Release $previousBackend $previousFrontend
+        Start-Release $previousSchema $previousBackend $previousFrontend
         Test-Release
         Write-Record 'ROLLED BACK' "$failure. Restored $previousBackend"
     }
@@ -207,6 +219,6 @@ catch {
     exit 1
 }
 
-Remove-OldImages -Keep @($backendImage, $frontendImage, $previousBackend, $previousFrontend)
+Remove-OldImages -Keep @($schemaImage, $backendImage, $frontendImage, $previousSchema, $previousBackend, $previousFrontend)
 Write-Record 'DEPLOYED' "UI $uiUrl, API $apiUrl"
 Write-Step "Release $Tag is live: UI $uiUrl, API $apiUrl"

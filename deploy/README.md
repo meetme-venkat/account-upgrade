@@ -16,10 +16,12 @@ every 2 minutes (scheduled task, as you, while you're logged on)
         ▼
   clean checkout of that commit      %LOCALAPPDATA%\account-upgrade\pipeline\repo
   backend tests                      mvnw verify: unit + integration tests (Testcontainers), coverage gate, enforcer
-  build images                       local/account-upgrade-{backend,frontend}:<sha>
+  build images                       every service with a build context in the commit's docker-compose.yml:
+                                     local/account-update-db-schema, account-upgrade-{backend,frontend}:<sha>
                                      (the frontend's tests and budgeted production build run inside its image build)
   Trivy scan                         no fixable CRITICAL vulnerability
-  deploy.ps1                         compose up --wait (all health checks) ─► smoke test
+  deploy.ps1                         compose up --wait, in order: schema job (must exit 0) ─► backend (healthy)
+                                     ─► frontend (healthy) ─► smoke test
                                        └─ failure: roll back to the images that were running
 ```
 
@@ -28,7 +30,8 @@ every 2 minutes (scheduled task, as you, while you're logged on)
 | Nothing untested is deployed | Each stage must pass before the next starts |
 | Builds are reproducible | Clean checkout (`git clean -ffdx`) of exactly the commit on `main`, separate from any working copy |
 | Releases are traceable | Images are tagged with the full commit SHA and labelled with it (`org.opencontainers.image.revision`) |
-| The stack definition matches the images | The commit's own `docker-compose.yml` and `deploy.ps1` are used |
+| The stack definition matches the images | The commit's own `docker-compose.yml` and `deploy.ps1` are used, and the images to build are read from that `docker-compose.yml` |
+| Schema before code | The schema job runs first on every deployment; the backend starts only if it exits 0, the frontend only once the backend is healthy. A failed migration replaces nothing and triggers the rollback |
 | One run at a time | A lock file, and the scheduled task never overlaps itself |
 | A bad release doesn't stay live | Health checks + smoke test (API → Kafka → PostgreSQL → email outbox, and the UI's `/api` proxy), automatic rollback |
 | A broken commit isn't retried every 2 minutes | It is attempted once; the next push to `main`, or `-Force`, runs again |
@@ -70,7 +73,7 @@ in a clone works the same.
 | Faster manual run | `-SkipTests` and/or `-SkipScan` |
 | Pause / resume | `Disable-ScheduledTask AccountUpgrade-CD` / `Enable-ScheduledTask AccountUpgrade-CD` |
 | Change the interval | `install-pipeline.ps1 -IntervalMinutes 5` |
-| Update after changing `pipeline.ps1` | Run `install-pipeline.ps1` again |
+| Update after changing `pipeline.ps1` | Run `install-pipeline.ps1` again (adding or removing a service does not need it: the images to build come from `docker-compose.yml`) |
 | Remove | `install-pipeline.ps1 -Uninstall` |
 | See what's running | `docker compose -p account-upgrade ps` |
 
@@ -101,8 +104,10 @@ record in the processed requests, from its smoke test.
   minutes, mostly the backend's integration tests.
 - **Only while you're logged on.** Rancher Desktop runs in your login session, so the pipeline does too. Commits
   pushed meanwhile are deployed (the latest one) at the next check after you log on.
-- **Database migrations go forward only.** Flyway runs at backend startup. A rollback restores the previous images
-  but not the previous schema, so keep migrations backward compatible (expand, then contract) for rollback to be safe.
+- **Database migrations go forward only.** The `account-update-db-schema` job (Liquibase) migrates the schema before
+  the backend starts. A rollback restores the previous images but not the previous schema, so keep migrations
+  backward compatible (expand, then contract) for rollback to be safe. See
+  [account-update-db-schema](../account-update-db-schema/README.md#changing-the-schema).
 - **Short downtime on each deployment.** One backend and one frontend container are replaced in place. Zero-downtime
   rollouts need several replicas behind a load balancer, which means Kubernetes (Rancher Desktop includes k3s).
 - **Image retention.** The machine keeps the current, previous and 5 older releases of each image for fast rollback.

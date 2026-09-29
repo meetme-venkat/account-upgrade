@@ -31,6 +31,7 @@ public final class TestContainers {
         if (postgres == null) {
             postgres = new PostgreSQLContainer(POSTGRES_IMAGE).withDatabaseName("account_upgrade_test");
             postgres.start();
+            DatabaseSchema.apply(postgres);
         }
         return postgres;
     }

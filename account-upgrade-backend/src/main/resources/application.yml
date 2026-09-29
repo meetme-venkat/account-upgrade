@@ -14,7 +14,8 @@ spring:
     # Time each lifecycle phase (web server, Kafka listeners) gets to finish on shutdown.
     timeout-per-shutdown-phase: 30s
 
-  # Processed requests and the notification outbox. Schema is managed by Flyway (db/migration).
+  # Processed requests and the notification outbox. The schema is created and migrated by the separate
+  # account-update-db-schema service (Liquibase), which runs before this application starts.
   datasource:
     hikari:
       # Consumer threads + outbox relay + HTTP requests. Check PostgreSQL max_connections against replicas x pool.

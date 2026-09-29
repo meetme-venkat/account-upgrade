@@ -1,0 +1,9 @@
+# Master changelog: every schema change, in order. Liquibase records each applied changeset in
+# DATABASECHANGELOG, so `update` only runs what is new. See ../README.md before adding a change.
+databaseChangeLog:
+  - include:
+      file: changes/001-processed-upgrades.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/002-notification-outbox.sql
+      relativeToChangelogFile: true
