@@ -10,7 +10,7 @@
 #   API_RATE_LIMIT_BURST  requests allowed at once above that rate
 #   HSTS_VALUE            Strict-Transport-Security value; set only when served over HTTPS
 
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts
