@@ -1,0 +1,94 @@
+# Publish: every push to main passes both CI workflows, then its images are built, scanned and published to GHCR.
+# Deployment is not done here: deploy/pipeline.ps1 on the Rancher Desktop machine builds and deploys main by itself
+# (see deploy/README.md). The GHCR images are release artifacts for other environments.
+#
+#   push to main ─► backend CI ─┐
+#                  frontend CI ─┴─► build + scan + push (per service)
+#                                    ghcr.io/<owner>/<service>:<sha> (+ :main), with SBOM and provenance
+name: publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
+jobs:
+  backend-ci:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/backend.yml
+
+  frontend-ci:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/frontend.yml
+
+  build:
+    needs: [backend-ci, frontend-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [account-upgrade-backend, account-upgrade-frontend]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Immutable tag = full commit SHA (what gets deployed); "main" floats to the latest release.
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=main
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.service }}
+          load: true
+          tags: ${{ matrix.service }}:scan
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      # Guardrail: nothing with a fixable critical vulnerability is published.
+      - name: Vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.service }}:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      # Same build, fully cached, now pushed with an SBOM and build provenance attached.
+      - name: Push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          provenance: mode=max
+          sbom: true
+

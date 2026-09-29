@@ -125,7 +125,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Dnet.bytebuddy.experimental=true -Xshare:off</argLine>
+                    <!-- UTC: the JDBC driver sends the JVM time zone to PostgreSQL, which rejects legacy zone IDs
+                         (e.g. Asia/Calcutta, what Windows maps IST to). Tests then run the same on every machine. -->
+                    <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Dnet.bytebuddy.experimental=true -Xshare:off -Duser.timezone=UTC</argLine>
                 </configuration>
             </plugin>
             <!-- Build guardrails: supported toolchain, no duplicate or snapshot dependencies in releases. -->

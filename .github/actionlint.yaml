@@ -1,4 +1,0 @@
-# Custom labels of the self-hosted runner that deploys to Rancher Desktop (see deploy/README.md).
-self-hosted-runner:
-  labels:
-    - rancher-desktop

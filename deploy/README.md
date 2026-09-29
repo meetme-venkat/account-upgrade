@@ -1,107 +1,108 @@
 # Continuous delivery to Rancher Desktop
 
-Every push to `main` is tested, built, scanned, published and deployed to the Docker engine of Rancher Desktop on
-the deployment machine. The pipeline is [`.github/workflows/cd.yml`](../.github/workflows/cd.yml); the deployment
-itself is [`deploy.ps1`](deploy.ps1).
+Every push to `main` is tested, built, scanned and deployed to Rancher Desktop by scripts on the deployment machine.
+GitHub only hosts the code: there is no runner to register, no registry to pull from, and no credentials to store.
+
+| Script | Role |
+|---|---|
+| [`pipeline.ps1`](pipeline.ps1) | The pipeline: checks `main` for a new commit, then tests, builds, scans and deploys it |
+| [`deploy.ps1`](deploy.ps1) | The deployment step: rolls the stack forward, smoke tests it, rolls back on failure |
+| [`install-pipeline.ps1`](install-pipeline.ps1) | Schedules the pipeline every few minutes as a Windows scheduled task |
 
 ```
-push to main
-  ├─ backend CI  (backend.yml: tests on Java 17 + 21, coverage gate, enforcer, prod image end to end)
-  └─ frontend CI (frontend.yml: format, tests + coverage gate, budgeted build, audit, image checks)
-        │ both green
+every 2 minutes (scheduled task, as you, while you're logged on)
+  git fetch main ─► new commit?  no ─► done
+        │ yes
         ▼
-  build (GitHub-hosted, per service)
-    buildx build (layer cache) ─► Trivy scan: no fixable CRITICAL ─► push to GHCR with SBOM + provenance
-      ghcr.io/<owner>/account-upgrade-backend:<commit sha>   (+ :main)
-      ghcr.io/<owner>/account-upgrade-frontend:<commit sha>  (+ :main)
-        │
-        ▼
-  deploy (self-hosted runner on the Rancher Desktop machine, environment "rancher-desktop")
-    checkout that commit ─► deploy.ps1:
-      pull images ─► docker compose up --wait (all health checks) ─► smoke test
-        │ any failure
-        └─► roll back to the images that were running, job fails
+  clean checkout of that commit      %LOCALAPPDATA%\account-upgrade\pipeline\repo
+  backend tests                      mvnw verify: unit + integration tests (Testcontainers), coverage gate, enforcer
+  build images                       local/account-upgrade-{backend,frontend}:<sha>
+                                     (the frontend's tests and budgeted production build run inside its image build)
+  Trivy scan                         no fixable CRITICAL vulnerability
+  deploy.ps1                         compose up --wait (all health checks) ─► smoke test
+                                       └─ failure: roll back to the images that were running
 ```
 
 | Guarantee | How |
 |---|---|
-| Nothing untested is deployed | The deploy job needs both CI workflows and the build to pass |
-| Nothing with a known fixable critical CVE is published | Trivy gate before push |
-| Immutable, traceable releases | Images are tagged with the full commit SHA and carry an SBOM and build provenance |
-| The stack definition matches the images | The deploy job checks out the released commit's `docker-compose.yml` |
-| One deployment at a time, never cut off halfway | `concurrency: cd-main`, `cancel-in-progress: false` |
-| A bad release doesn't stay live | `compose up --wait` + smoke test (API → Kafka → PostgreSQL → email outbox, and the UI's `/api` proxy); on failure, automatic rollback |
-| Deployments are auditable | GitHub environment history, job summary, and `%LOCALAPPDATA%\account-upgrade\deployments.log` on the machine |
+| Nothing untested is deployed | Each stage must pass before the next starts |
+| Builds are reproducible | Clean checkout (`git clean -ffdx`) of exactly the commit on `main`, separate from any working copy |
+| Releases are traceable | Images are tagged with the full commit SHA and labelled with it (`org.opencontainers.image.revision`) |
+| The stack definition matches the images | The commit's own `docker-compose.yml` and `deploy.ps1` are used |
+| One run at a time | A lock file, and the scheduled task never overlaps itself |
+| A bad release doesn't stay live | Health checks + smoke test (API → Kafka → PostgreSQL → email outbox, and the UI's `/api` proxy), automatic rollback |
+| A broken commit isn't retried every 2 minutes | It is attempted once; the next push to `main`, or `-Force`, runs again |
+| Auditable | One log per run, a deployment history, and the current state (see below) |
 
-## One-time setup
+## Setup
 
-### 1. Protect the repository (important: the repository is public)
+Requirements on the deployment machine: Git, a JDK 17 or later on `PATH` (for the backend tests), and Rancher
+Desktop with the **dockerd (moby)** engine (*Preferences → Container Engine*).
 
-A self-hosted runner executes whatever a workflow tells it to. On a public repository, a pull request from a fork
-could otherwise run code on this machine.
+```powershell
+# from a clone of the repository
+powershell -NoProfile -ExecutionPolicy Bypass -File deploy\install-pipeline.ps1
+```
 
-- **Settings → Actions → General → Approval for running fork pull request workflows from contributors:** choose
-  *Require approval for all external contributors*. Never approve a fork PR that edits `.github/workflows/`
-  without reading it.
-- **Settings → Environments → New environment** `rancher-desktop`:
-  - *Deployment branches and tags*: **Selected branches** → `main`. Only `main` can deploy.
-  - Optional: *Required reviewers* to approve each deployment by hand.
-- **Settings → Branches:** protect `main` and require the `backend` and `frontend` checks on pull requests.
+This registers the scheduled task `AccountUpgrade-CD`. It runs as you, only while you are logged on (the same
+session as Rancher Desktop), needs no password or admin rights, and shows no window. The first run deploys the
+current `main`.
 
-### 2. Install the self-hosted runner on the Rancher Desktop machine
-
-Rancher Desktop must use the **dockerd (moby)** engine (*Preferences → Container Engine*).
-
-1. **Settings → Actions → Runners → New self-hosted runner → Windows, x64.** Copy the token it shows.
-2. In PowerShell, outside the repository clone:
-   ```powershell
-   mkdir C:\actions-runner; cd C:\actions-runner
-   # Download and extract the runner zip with the commands GitHub shows on that page, then:
-   .\config.cmd --url https://github.com/meetme-venkat/account-upgrade --token <TOKEN> `
-       --name rancher-desktop-$env:COMPUTERNAME --labels rancher-desktop --work _work
-   ```
-3. Run it as **your own Windows account**, which is the one that can reach Rancher Desktop's Docker engine and has
-   `docker` on its `PATH`. Pick one:
-   - Interactive: `.\run.cmd` in a terminal you leave open.
-   - Windows service: answer **Y** to *run as service* during `config.cmd` and give your own account, not the
-     default `NT AUTHORITY\NETWORK SERVICE` (that account cannot use Docker).
-
-The runner shows as *Idle* under **Settings → Actions → Runners**. Rancher Desktop runs in your login session, so
-deployments happen while you are logged in with Rancher Desktop started. A deployment that finds no runner waits in
-the queue, and gives up after 24 hours.
-
-### 3. First deployment
-
-The pipeline owns one compose stack, the project `account-upgrade`. Stop any stack started by hand from a clone,
+The pipeline owns one compose stack, the project `account-upgrade`. Stop any stack started by hand from a clone first,
 because it holds ports 8080 and 4200 (the deployment refuses to start otherwise and names the containers):
 
 ```powershell
 docker compose -p <project> down      # e.g. -p mercur for a clone in D:\MERCUR. Add -v to also delete its data
 ```
 
-Then push to `main`, or run the **cd** workflow from the Actions tab.
-
 ## Operating it
+
+The installed copy of the pipeline is `%LOCALAPPDATA%\account-upgrade\pipeline\bin\pipeline.ps1`; `deploy\pipeline.ps1`
+in a clone works the same.
 
 | Task | How |
 |---|---|
-| Deploy | Push or merge to `main` |
-| Roll back / redeploy a release | Actions → **cd** → *Run workflow* on `main`, `image_tag` = that release's full commit SHA. Tests and build are skipped |
-| Roll back by hand | `powershell -ExecutionPolicy Bypass -File deploy\deploy.ps1 -Tag <sha>` (after `docker login ghcr.io`) |
-| Deploy local images without a registry | See the example at the top of `deploy.ps1` (`-Registry local -SkipPull`) |
+| Deploy | Push or merge to `main`; it's live within a few minutes |
+| What is deployed, last result | `pipeline.ps1 -Status` |
+| Deploy now, without waiting | `pipeline.ps1` |
+| Roll back / redeploy a release | `pipeline.ps1 -Commit <sha>` (rebuilds and tests that commit; must include `deploy\deploy.ps1`) |
+| Retry a failed commit | `pipeline.ps1 -Force` |
+| Faster manual run | `-SkipTests` and/or `-SkipScan` |
+| Pause / resume | `Disable-ScheduledTask AccountUpgrade-CD` / `Enable-ScheduledTask AccountUpgrade-CD` |
+| Change the interval | `install-pipeline.ps1 -IntervalMinutes 5` |
+| Update after changing `pipeline.ps1` | Run `install-pipeline.ps1` again |
+| Remove | `install-pipeline.ps1 -Uninstall` |
 | See what's running | `docker compose -p account-upgrade ps` |
-| Deployment history | Repository → *Environments* → `rancher-desktop`, or `%LOCALAPPDATA%\account-upgrade\deployments.log` |
+
+Run the scripts with `powershell -NoProfile -ExecutionPolicy Bypass -File <script> [options]`.
+
+Files, all under `%LOCALAPPDATA%\account-upgrade\`:
+
+| File | Content |
+|---|---|
+| `deployments.log` | One line per deployment: `DEPLOYED`, `ROLLED BACK` or `FAILED`, with the commit |
+| `pipeline\logs\<time>-<sha>.log` | Full output of each run (last 50 kept) |
+| `pipeline\state.json` | Deployed commit, last commit tried and its result |
+| `pipeline\poll.log` | Checks that could not run (network down, Rancher Desktop not started) |
 
 Endpoints: UI http://127.0.0.1:4200, API http://127.0.0.1:8080. Each deployment leaves one `deploy-smoke-<timestamp>`
 record in the processed requests, from its smoke test.
 
+## GitHub's part
+
+- Pull requests: the `backend` and `frontend` workflows check every change.
+- `main`: [`publish.yml`](../.github/workflows/publish.yml) runs both again, then builds, scans and publishes the images
+  to GHCR (`ghcr.io/<owner>/<service>:<sha>`, with SBOM and provenance) as release artifacts for other environments.
+  The Rancher Desktop deployment doesn't depend on it.
+
 ## Notes and limits
 
+- **Deployment delay.** A push is picked up at the next check (default every 2 minutes). A full run takes several
+  minutes, mostly the backend's integration tests.
+- **Only while you're logged on.** Rancher Desktop runs in your login session, so the pipeline does too. Commits
+  pushed meanwhile are deployed (the latest one) at the next check after you log on.
 - **Database migrations go forward only.** Flyway runs at backend startup. A rollback restores the previous images
   but not the previous schema, so keep migrations backward compatible (expand, then contract) for rollback to be safe.
 - **Short downtime on each deployment.** One backend and one frontend container are replaced in place. Zero-downtime
   rollouts need several replicas behind a load balancer, which means Kubernetes (Rancher Desktop includes k3s).
 - **Image retention.** The machine keeps the current, previous and 5 older releases of each image for fast rollback.
-  GHCR keeps every release; add a retention policy there if storage matters.
-- **Pinning.** Actions are referenced by major version and kept current by Dependabot. For a stricter supply chain,
-  pin them to commit SHAs.
