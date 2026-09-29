@@ -12,6 +12,9 @@ updates:
     groups:
       angular: { patterns: ['@angular/*', '@angular-devkit/*', '@schematics/*'] }
   - package-ecosystem: docker
+    directory: /account-update-db-schema
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
     directory: /account-upgrade-backend
     schedule: { interval: weekly }
   - package-ecosystem: docker

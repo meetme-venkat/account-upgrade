@@ -1,17 +1,20 @@
 # Account Upgrade Platform
 
-Two independently deployable services:
+Three independently deployable services, deployed in this order:
 
 | Folder | Service | Stack | Port |
 |---|---|---|---|
+| [`account-update-db-schema/`](account-update-db-schema) | Database schema: Liquibase changelog, applied as a one-shot job before the backend starts | Liquibase 5, PostgreSQL | – |
 | [`account-upgrade-backend/`](account-upgrade-backend) | Event-driven upgrade service: ingestion, eligibility, notifications, persistence, query API | Java 17+, Spring Boot 4, Kafka, PostgreSQL | 8080 |
 | [`account-upgrade-frontend/`](account-upgrade-frontend) | Web UI to submit requests and browse outcomes and notifications | Angular 22, served by nginx | 4200 |
 
-The two share no code and no build. The frontend depends only on the backend's REST API, and each folder has its own Dockerfile, tests and README.
+They share no code and no build. The backend depends on the schema the schema service creates, the frontend only on the backend's REST API, and each folder has its own Dockerfile, tests and README.
 
 ```
 Browser ──► frontend (nginx) ──/api──► backend ──► Kafka "upgrade-requests" ──► eligibility consumer ──► PostgreSQL
                                                                                     (decision + email outbox, one transaction)
+
+Deployment order:  account-update-db-schema (Liquibase, exits 0) ──► backend (healthy) ──► frontend
 ```
 
 ## Run with Docker (everything)
@@ -20,14 +23,14 @@ Browser ──► frontend (nginx) ──/api──► backend ──► Kafka "
 docker compose up --build         # UI http://localhost:4200, API http://localhost:8080
 ```
 
-This starts PostgreSQL, a 3-broker Kafka cluster, the backend (prod profile) and the frontend.
+This starts PostgreSQL and a 3-broker Kafka cluster, then the schema job, then the backend (prod profile) once the schema is up to date, then the frontend once the backend is healthy.
 
 ## Run from source
 
 Needs a Docker engine (Docker Desktop, or Rancher Desktop with `dockerd (moby)`). PostgreSQL and Kafka always run as containers.
 
 ```bash
-# terminal 1: backend. Starts its PostgreSQL + Kafka containers automatically, then the app
+# terminal 1: backend. Starts PostgreSQL, the schema job and Kafka as containers automatically, then the app
 cd account-upgrade-backend
 ./mvnw spring-boot:run            # Windows PowerShell: .\mvnw.cmd spring-boot:run
 

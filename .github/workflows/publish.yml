@@ -2,8 +2,9 @@
 # Deployment is not done here: deploy/pipeline.ps1 on the Rancher Desktop machine builds and deploys main by itself
 # (see deploy/README.md). The GHCR images are release artifacts for other environments.
 #
-#   push to main ─► backend CI ─┐
-#                  frontend CI ─┴─► build + scan + push (per service)
+#   push to main ─► db-schema CI ─┐
+#                  backend CI ───┤
+#                  frontend CI ──┴─► build + scan + push (per service)
 #                                    ghcr.io/<owner>/<service>:<sha> (+ :main), with SBOM and provenance
 name: publish
 
@@ -20,6 +21,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  db-schema-ci:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/db-schema.yml
+
   backend-ci:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/backend.yml
@@ -29,7 +34,7 @@ jobs:
     uses: ./.github/workflows/frontend.yml
 
   build:
-    needs: [backend-ci, frontend-ci]
+    needs: [db-schema-ci, backend-ci, frontend-ci]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -37,7 +42,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        service: [account-upgrade-backend, account-upgrade-frontend]
+        service: [account-update-db-schema, account-upgrade-backend, account-upgrade-frontend]
     steps:
       - uses: actions/checkout@v7
 

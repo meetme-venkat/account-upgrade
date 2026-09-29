@@ -3,9 +3,13 @@
 #   UI:  http://localhost:4200     API: http://localhost:8080
 #
 # PostgreSQL + a 3-broker Kafka cluster (so topics get replication factor 3 / min.insync.replicas 2, which the
-# backend's prod profile requires) + backend + frontend. Each service can also be built and run on its own.
+# backend's prod profile requires) + the three application services, started in order:
+#   1. account-update-db-schema  Liquibase: brings the schema up to date, then exits (0 = success)
+#   2. account-upgrade-backend   only after the schema job completed successfully
+#   3. account-upgrade-frontend  only once the backend is healthy
+# If the schema job fails, nothing after it starts. Each service can also be built and run on its own.
 # The credentials below are for local use only.
-# BACKEND_IMAGE / FRONTEND_IMAGE override the app images; the CD pipeline sets them to the registry images of the
+# DB_SCHEMA_IMAGE / BACKEND_IMAGE / FRONTEND_IMAGE override the app images; the CD pipeline sets them to the registry images of the
 # commit being deployed (see deploy/deploy.ps1). Unset, they fall back to the locally built images.
 x-kafka: &kafka
   image: apache/kafka:3.9.1
@@ -57,6 +61,24 @@ services:
       KAFKA_NODE_ID: 3
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092
 
+  account-update-db-schema:
+    build: ./account-update-db-schema
+    image: ${DB_SCHEMA_IMAGE:-account-update-db-schema:latest}
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/account_upgrade
+      LIQUIBASE_COMMAND_USERNAME: postgres
+      LIQUIBASE_COMMAND_PASSWORD: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    mem_limit: 512m
+    pids_limit: 256
+    # A job: runs to completion on every deployment (a no-op when the schema is already current).
+    restart: "no"
+
   account-upgrade-backend:
     build: ./account-upgrade-backend
     image: ${BACKEND_IMAGE:-account-upgrade-backend:latest}
@@ -70,6 +92,8 @@ services:
       UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR: "3"
       UPGRADE_MESSAGING_KAFKA_MIN_INSYNC_REPLICAS: "2"
     depends_on:
+      account-update-db-schema:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       kafka-1:
@@ -98,8 +122,10 @@ services:
     mem_limit: 128m
     pids_limit: 128
     restart: unless-stopped
-    # No depends_on: the frontend starts and serves the UI without the backend,
-    # and shows "Backend down" until it is reachable.
+    # Deployed last. (The frontend itself tolerates a missing backend: it shows "Backend down" until reachable.)
+    depends_on:
+      account-upgrade-backend:
+        condition: service_healthy
 
 volumes:
   postgres-data:

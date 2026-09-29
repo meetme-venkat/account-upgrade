@@ -6,9 +6,13 @@
     Runs entirely on this machine. GitHub is only where the code comes from: no runner, no registry.
 
       git fetch ─► new commit on main? ─► clean checkout ─► backend tests (mvnw verify)
-        ─► build images (the frontend's tests and budgeted build run inside its image build)
+        ─► build images: database schema (Liquibase), backend, frontend (whose tests and budgeted build run
+           inside its image build)
         ─► Trivy scan (no fixable CRITICAL vulnerabilities)
-        ─► deploy.ps1 (compose up --wait, smoke test, rollback to the previous release on failure)
+        ─► deploy.ps1 (schema job, then backend, then frontend; health checks, smoke test, rollback on failure)
+
+    The images to build are read from the commit's own docker-compose.yml (every service with a build context), so
+    the pipeline works for any commit, whatever services it has.
 
     Each call handles at most one commit and returns. install-pipeline.ps1 schedules it every few minutes, so a push
     to main goes live within minutes. A commit that fails is not retried until main moves on (or -Force).
@@ -51,7 +55,6 @@ $repoDir = Join-Path $StateDir 'repo'
 $logDir = Join-Path $StateDir 'logs'
 $stateFile = Join-Path $StateDir 'state.json'
 $historyFile = Join-Path (Split-Path -Parent $StateDir) 'deployments.log'   # shared with deploy.ps1
-$services = 'account-upgrade-backend', 'account-upgrade-frontend'
 $trivyImage = 'aquasec/trivy:0.74.0'
 New-Item -ItemType Directory -Force -Path $StateDir, $logDir | Out-Null
 
@@ -172,18 +175,26 @@ try {
     }
 
     $stage = 'build'
-    foreach ($service in $services) {
-        Write-Stage "Building local/${service}:$short"
+    # Every service of the commit's stack that is built from this repository (image local/<service>:<sha>).
+    $stack = Get-NativeOutput docker @('compose', '-f', (Join-Path $repoDir 'docker-compose.yml'), 'config', '--format', 'json') |
+        Out-String | ConvertFrom-Json
+    $builds = @($stack.services.PSObject.Properties |
+        Where-Object { $_.Value.PSObject.Properties.Name -contains 'build' } |
+        ForEach-Object { [pscustomobject]@{ Name = $_.Name; Context = $_.Value.build.context } })
+    if (-not $builds) { throw 'docker-compose.yml defines no services to build' }
+    Write-Host "Services to build: $(($builds | ForEach-Object Name) -join ', ')"
+    foreach ($build in $builds) {
+        Write-Stage "Building local/$($build.Name):$short"
         Invoke-Native docker @('build', '--progress=plain',
             '--label', "org.opencontainers.image.revision=$target",
             '--label', "org.opencontainers.image.source=$RepoUrl",
-            '-t', "local/${service}:$target", $service)
+            '-t', "local/$($build.Name):$target", $build.Context)
     }
 
     if ($SkipScan) { Write-Stage 'Vulnerability scan SKIPPED (-SkipScan)' }
     else {
         $stage = 'scan'
-        foreach ($service in $services) {
+        foreach ($service in $builds.Name) {
             Write-Stage "Scanning local/${service}:$short (fail on fixable CRITICAL)"
             Invoke-Native docker @('run', '--rm',
                 '-v', '//var/run/docker.sock:/var/run/docker.sock',

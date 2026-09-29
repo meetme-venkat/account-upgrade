@@ -6,7 +6,8 @@ name: backend
 on:
   workflow_call:
   pull_request:
-    paths: ['account-upgrade-backend/**', '.github/workflows/backend.yml']
+    # The integration tests create their schema from the schema service's changelog.
+    paths: ['account-upgrade-backend/**', 'account-update-db-schema/**', '.github/workflows/backend.yml']
 
 permissions:
   contents: read

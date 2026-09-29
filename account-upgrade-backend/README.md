@@ -3,7 +3,7 @@
 An event-driven Spring Boot service that ingests account upgrade requests from two channels: batch and real-time. It checks each request against
 the eligibility rules, notifies the user (and the parent, where relevant), stores the outcome and serves it back over REST.
 
-- **Stack:** Java 17+, Spring Boot 4.1, Kafka (Spring Kafka), PostgreSQL (JDBC + Flyway), JUnit 5, Mockito, AssertJ, Awaitility
+- **Stack:** Java 17+, Spring Boot 4.1, Kafka (Spring Kafka), PostgreSQL (JDBC; schema owned by the [`account-update-db-schema`](../account-update-db-schema) service), JUnit 5, Mockito, AssertJ, Awaitility
 - **Infrastructure:** PostgreSQL and Kafka, always as containers: `spring-boot:run` starts them (Docker Compose support), tests use Testcontainers, and deployments point at managed services (e.g. RDS, MSK).
 
 ## Architecture
@@ -36,7 +36,7 @@ Each package has a single responsibility and could be split into its own microse
 | `processing` | Consumer that orchestrates eligibility → notification → persistence in one transaction |
 | `eligibility` | Pluggable rules engine; thresholds configurable in `application.yml` |
 | `notification` | Builds the user and parent emails. The transactional outbox (`EmailSenderImpl`), the `OutboxRelay` that delivers them, and the `EmailChannel` port (log-only today) |
-| `persistence` | `ProcessedUpgradeRepository` port and its PostgreSQL adapter (Flyway schema in `db/migration`) |
+| `persistence` | `ProcessedUpgradeRepository` port and its PostgreSQL adapter. The tables are created and migrated by the separate [`account-update-db-schema`](../account-update-db-schema) service (Liquibase), which is deployed first; this service never changes the schema |
 | `query` | Read API for processed requests |
 | `guardrails`, `web` | Production guardrails, CORS, global error handling (RFC 9457 problem details) |
 

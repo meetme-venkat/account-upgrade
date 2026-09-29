@@ -80,5 +80,9 @@ A. Ingest Request
    @ConfigurationProperties, overridable by environment variables; never hard-coded constants. Topics:
    upgrade.messaging.topics.upgrade-requests and upgrade.messaging.topics.upgrade-requests-dlq (dead-letter queue,
    default <topic>-dlq).
+   The database schema belongs to the account-update-db-schema service (Liquibase), never to the backend: no .sql
+   files or migration tool in the backend. Schema changes are new changesets in account-update-db-schema/changelog
+   (never edit an applied one), each with a --rollback, backward compatible with the running backend (expand, then
+   contract). Deployment order: account-update-db-schema (job, must exit 0) -> backend (healthy) -> frontend.
 
  
