@@ -26,6 +26,7 @@ account-update-db-schema  ──exit 0──►  account-upgrade-backend  ──
 |---|---|
 | [`001-processed-upgrades`](changelog/changes/001-processed-upgrades.sql) | `processed_upgrades`: one row per processed request (`event_id` is the idempotency key, `seq` the store order) and its indexes |
 | [`002-notification-outbox`](changelog/changes/002-notification-outbox.sql) | `notification_outbox`: the transactional email outbox and its partial indexes for pending and sent rows |
+| [`003-drop-flyway-schema-history`](changelog/changes/003-drop-flyway-schema-history.sql) | Drops `flyway_schema_history`, left over in databases the backend created with Flyway (no-op elsewhere) |
 
 ## Run it
 
@@ -76,7 +77,7 @@ Where it runs:
 
 CI ([`.github/workflows/db-schema.yml`](../.github/workflows/db-schema.yml)) checks every change: the changelog applies to
 an empty database, a second run changes nothing, every changeset rolls back and applies again, and a database created by
-the former Flyway migration is adopted with its data intact. The backend's CI also runs, because its tests use this
+the former Flyway migration is adopted with its data intact and its Flyway history table dropped. The backend's CI also runs, because its tests use this
 changelog.
 
 ## Rollback
@@ -93,5 +94,5 @@ rolling back a `CREATE TABLE` drops the table and its data.
 
 Before this service existed, the backend created the schema with Flyway (`V1__processed_upgrades_and_outbox.sql`).
 Each changeset has a precondition: if its table already exists, it is recorded as applied (`MARK_RAN`) instead of
-failing. A database created by Flyway is therefore adopted on the first run, with its data untouched. The old
-`flyway_schema_history` table is left in place and no longer used.
+failing. A database created by Flyway is therefore adopted on the first run, with its data untouched. Changeset
+`003` then drops Flyway's obsolete `flyway_schema_history` table (it has no rollback: nothing reads that table).
