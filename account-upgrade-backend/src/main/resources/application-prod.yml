@@ -1,0 +1,52 @@
+# Production profile: activate with SPRING_PROFILES_ACTIVE=prod (combine with kafka: prod,kafka).
+# ProductionReadinessCheck refuses to start if this configuration is unsafe. See PRODUCTION_GUARDRAILS.md.
+
+server:
+  # Trust X-Forwarded-For / -Proto from the reverse proxy (internal addresses only), so the rate
+  # limit and logs see the real client IP.
+  forward-headers-strategy: native
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-exception: false
+    include-binding-errors: never
+  tomcat:
+    threads:
+      max: 200
+    accept-count: 100
+    connection-timeout: 10s
+
+spring:
+  jackson:
+    deserialization:
+      # Reject unknown JSON fields so client typos surface as 400s instead of being dropped silently.
+      fail-on-unknown-properties: true
+
+upgrade:
+  guardrails:
+    rate-limit:
+      enabled: ${UPGRADE_GUARDRAILS_RATE_LIMIT_ENABLED:true}
+      requests-per-second: ${UPGRADE_GUARDRAILS_RATE_LIMIT_RPS:20}
+      burst: ${UPGRADE_GUARDRAILS_RATE_LIMIT_BURST:40}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # No env, beans, configprops, heapdump etc.; metrics stay available for scraping.
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: false
+
+logging:
+  pattern:
+    correlation: "[%X{requestId:-}] "
+  level:
+    root: INFO
+    com.mercur.upgrade: INFO

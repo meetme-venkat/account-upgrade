@@ -1,0 +1,26 @@
+<header class="app-header">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">&#8679;</span>
+    <span>Account Upgrades</span>
+  </div>
+  <nav>
+    <a routerLink="/submit" routerLinkActive="active">Submit</a>
+    <a routerLink="/processed" routerLinkActive="active">Processed</a>
+    <a routerLink="/notifications" routerLinkActive="active">Notifications</a>
+  </nav>
+  <span
+    class="health"
+    [class.up]="backendUp() === true"
+    [class.down]="backendUp() === false"
+    [attr.title]="
+      'Backend health: ' + (backendUp() === undefined ? 'checking' : backendUp() ? 'UP' : 'DOWN')
+    "
+  >
+    <span class="dot"></span>
+    Backend {{ backendUp() === undefined ? 'checking...' : backendUp() ? 'up' : 'down' }}
+  </span>
+</header>
+
+<main class="container">
+  <router-outlet />
+</main>

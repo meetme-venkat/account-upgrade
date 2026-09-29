@@ -1,0 +1,42 @@
+#!/bin/sh
+# Sourced by the nginx entrypoint before templates are rendered.
+# Derives the CSP connect-src from API_BASE_URL and validates settings, so a typo fails the
+# container at startup instead of producing a broken or unprotected config.
+
+fail() { echo "ERROR: $*" >&2; exit 1; }
+
+# URLs are written into config.json, the CSP header and nginx config: no quotes, spaces,
+# semicolons or backslashes.
+has_unsafe_chars() {
+    case "$1" in
+        *'"'*|*"'"*|*' '*|*';'*|*'\'*) return 0 ;;
+    esac
+    return 1
+}
+
+CSP_CONNECT_SRC="'self'"
+if [ -n "${API_BASE_URL:-}" ]; then
+    has_unsafe_chars "$API_BASE_URL" && fail "API_BASE_URL contains forbidden characters: $API_BASE_URL"
+    case "$API_BASE_URL" in
+        https://*|http://localhost*|http://127.0.0.1*) ;;
+        http://*) echo "WARNING: API_BASE_URL uses plain http; use https in production" >&2 ;;
+        *) fail "API_BASE_URL must be an absolute http(s) URL, got '$API_BASE_URL'" ;;
+    esac
+    CSP_CONNECT_SRC="'self' ${API_BASE_URL}"
+fi
+export CSP_CONNECT_SRC
+
+for var in API_RATE_LIMIT_RPS API_RATE_LIMIT_BURST POLL_INTERVAL_MS; do
+    eval "value=\${$var:-}"
+    case "$value" in
+        ''|*[!0-9]*) fail "$var must be a positive integer, got '$value'" ;;
+    esac
+    [ "$value" -ge 1 ] || fail "$var must be at least 1"
+done
+[ "$POLL_INTERVAL_MS" -ge 1000 ] || fail "POLL_INTERVAL_MS must be at least 1000 to avoid hammering the backend"
+
+has_unsafe_chars "${BACKEND_URL:-}" && fail "BACKEND_URL contains forbidden characters: $BACKEND_URL"
+case "${BACKEND_URL:-}" in
+    http://*|https://*) ;;
+    *) fail "BACKEND_URL must be http(s)://host:port, got '${BACKEND_URL:-}'" ;;
+esac

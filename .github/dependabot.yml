@@ -1,0 +1,22 @@
+# Production guardrail: weekly dependency and base-image updates, grouped to keep PR noise low.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /account-upgrade-backend
+    schedule: { interval: weekly }
+    groups:
+      spring: { patterns: ['org.springframework*'] }
+  - package-ecosystem: npm
+    directory: /account-upgrade-frontend
+    schedule: { interval: weekly }
+    groups:
+      angular: { patterns: ['@angular/*', '@angular-devkit/*', '@schematics/*'] }
+  - package-ecosystem: docker
+    directory: /account-upgrade-backend
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /account-upgrade-frontend
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
