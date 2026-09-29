@@ -10,7 +10,7 @@ the eligibility rules, notifies the user (and the parent, where relevant), store
 
 ```
 POST /api/batch-upgrade ──┐
-                          ├─► IngestionService ──► EventPublisherImpl ──► topic "upgrade-requests"
+                          ├─► IngestionService ──► EventPublisherImpl ──► topic "upgrade-requests"  (name configurable per environment)
 POST /api/realtime-upgrade┘   (validate, 202)        (key = userId, acks=all)     │
                                                                                    ▼
                           UpgradeRequestHandlerImpl  (Kafka consumer group, N threads per instance)
@@ -53,7 +53,7 @@ Each package has a single responsibility and could be split into its own microse
 - **Broker unavailable:** the producer gives up after 3 s (`max.block.ms`) or 9 s (`delivery.timeout.ms`), always before the 10 s publish wait ends. So:
   - a real-time request gets `503`, meaning "not written";
   - a batch item gets a `REJECTED` receipt, and the rest of the batch continues.
-- **Retries and dead letters:** a failed record is retried with exponential backoff (1 s up to 30 s, about 3.5 minutes in total, so events survive a short database outage). After that it goes to `upgrade-requests-dlt`. Unreadable payloads go there immediately.
+- **Retries and dead letters:** a failed record is retried with exponential backoff (1 s up to 30 s, about 3.5 minutes in total, so events survive a short database outage). After that it goes to the dead-letter queue, `upgrade-requests-dlq`. Unreadable payloads go there immediately.
 - **Idempotency and exactly-once effects:** delivery is at-least-once. For each event, the processor writes the duplicate check, the decision and the email rows in **one PostgreSQL transaction**:
   - a crash or database error rolls everything back, so the redelivered event is processed cleanly;
   - a concurrent duplicate on another instance (after a rebalance) finds the decision already taken (`ON CONFLICT DO NOTHING`) and discards its own email rows;
@@ -137,6 +137,8 @@ The image runs the `prod` profile, which applies the [production guardrails](PRO
 | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | PostgreSQL connection (required; no default) |
 | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | Kafka brokers, comma-separated (required; no default) |
 | `SPRING_KAFKA_SECURITY_PROTOCOL` | `SSL` for Amazon MSK with TLS (default `PLAINTEXT`) |
+| `UPGRADE_MESSAGING_TOPICS_UPGRADE_REQUESTS` | Name of the upgrade-requests topic (default `upgrade-requests`), for example with an environment prefix: `prod.upgrade-requests` |
+| `UPGRADE_MESSAGING_TOPICS_UPGRADE_REQUESTS_DLQ` | Name of its dead-letter queue (default: the topic name + `-dlq`, so it follows the variable above) |
 | `UPGRADE_MESSAGING_PARTITIONS` | Topic partitions (default 4). Must be at least replicas × consumer concurrency, and can only grow later |
 | `UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY` | Consumer threads per instance (default 4) |
 | `UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR` / `_MIN_INSYNC_REPLICAS` | Topic durability (defaults 1 / 1 for a single dev broker). `prod` requires 3 / 2 |
@@ -231,7 +233,9 @@ More sample requests are in [`requests.http`](requests.http), which you can run 
 | `UpgradeRequestHandlerImplTest` | Mockito: eligible and ineligible outcomes are persisted, notification failure is recorded, duplicate events are skipped |
 | `NotificationServiceTest` | Mockito: user only, user and parent, decline with reasons, partial delivery failure |
 | `IngestionServiceTest` | Mockito: event creation, real-time failure propagation, partial batch failure |
-| `RateLimitFilterTest` / `ProductionReadinessCheckTest` / `KafkaConfigTest` | Rate limiting; CORS, Kafka RF/minISR and transaction-manager startup rules; topic and DLT durability settings |
+| `RateLimitFilterTest` / `ProductionReadinessCheckTest` / `KafkaConfigTest` | Rate limiting; CORS, Kafka RF/minISR and transaction-manager startup rules; topic names and durability, dead-letter routing to the configured queue |
+| `MessagingPropertiesTest` | Topic names from `application.yml`, environment overrides (the DLQ follows the main topic), and startup validation: missing, illegal or identical names |
+| `DeadLetterQueueIntegrationTest` *(IT)* | With the topic renamed for an environment, an unreadable event lands in that environment's `-dlq` queue on the real broker |
 | `ImplementationNamingConventionTest` | Every implementation of an application interface is a `<Name>Impl` in an `impl` package, and `impl` packages hold nothing else (see [Code conventions](#code-conventions)) |
 | `UpgradeFlowIntegrationTest` *(IT)* | HTTP → Kafka → decision + outbox → relay → query, with `notificationSent` turning true after delivery; validation errors; `Idempotency-Key` retries; `413` for oversized bodies; the query limit |
 | `TransactionalProcessingTest` *(IT)* | **Two instances racing on one event commit one decision and one email per recipient**; a failed decision save rolls back the emails and the retry starts clean; redeliveries are skipped |

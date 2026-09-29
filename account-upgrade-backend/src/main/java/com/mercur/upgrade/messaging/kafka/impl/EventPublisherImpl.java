@@ -1,8 +1,8 @@
 package com.mercur.upgrade.messaging.kafka.impl;
 
-import com.mercur.upgrade.common.Topics;
 import com.mercur.upgrade.common.UpgradeRequestedEvent;
 import com.mercur.upgrade.messaging.EventPublisher;
+import com.mercur.upgrade.messaging.MessagingProperties;
 import com.mercur.upgrade.messaging.PublishException;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -20,10 +20,13 @@ public class EventPublisherImpl implements EventPublisher {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final JsonMapper jsonMapper;
+    private final String topic;
 
-    public EventPublisherImpl(KafkaTemplate<String, String> kafkaTemplate, JsonMapper jsonMapper) {
+    public EventPublisherImpl(KafkaTemplate<String, String> kafkaTemplate, JsonMapper jsonMapper,
+                              MessagingProperties messaging) {
         this.kafkaTemplate = kafkaTemplate;
         this.jsonMapper = jsonMapper;
+        this.topic = messaging.topics().upgradeRequests();
     }
 
     @Override
@@ -31,7 +34,7 @@ public class EventPublisherImpl implements EventPublisher {
         String payload = jsonMapper.writeValueAsString(event);
         try {
             // Wait for the broker ack so a 202 response means the event is durably stored.
-            kafkaTemplate.send(Topics.UPGRADE_REQUESTS, event.key(), payload).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            kafkaTemplate.send(topic, event.key(), payload).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new PublishException("Interrupted while publishing event " + event.eventId(), e);

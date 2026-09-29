@@ -58,6 +58,11 @@ upgrade:
   ingestion:
     max-request-size: 5MB
   messaging:
+    # Topic names differ per environment: override with UPGRADE_MESSAGING_TOPICS_UPGRADE_REQUESTS (and
+    # UPGRADE_MESSAGING_TOPICS_UPGRADE_REQUESTS_DLQ). The dead-letter queue follows the main topic by default.
+    topics:
+      upgrade-requests: upgrade-requests
+      upgrade-requests-dlq: ${upgrade.messaging.topics.upgrade-requests}-dlq
     # Topic partitions: at least (max instances x consumer-concurrency). Partitions can only grow later.
     partitions: 4
     kafka:

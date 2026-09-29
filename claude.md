@@ -76,5 +76,9 @@ A. Ingest Request
    Classes implementing only framework interfaces (Spring, Kafka, servlet: CorsConfig, ProductionReadinessCheck,
    filters) keep framework-style names. Test doubles are exempt.
    Tests of an implementation mirror its package (e.g. persistence.impl.ProcessedUpgradeRepositoryImplTest).
+   Anything that varies by environment (Kafka topic names, thresholds, URLs) comes from application.yml via validated
+   @ConfigurationProperties, overridable by environment variables; never hard-coded constants. Topics:
+   upgrade.messaging.topics.upgrade-requests and upgrade.messaging.topics.upgrade-requests-dlq (dead-letter queue,
+   default <topic>-dlq).
 
  
