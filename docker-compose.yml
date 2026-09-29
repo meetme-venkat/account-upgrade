@@ -5,6 +5,8 @@
 # PostgreSQL + a 3-broker Kafka cluster (so topics get replication factor 3 / min.insync.replicas 2, which the
 # backend's prod profile requires) + backend + frontend. Each service can also be built and run on its own.
 # The credentials below are for local use only.
+# BACKEND_IMAGE / FRONTEND_IMAGE override the app images; the CD pipeline sets them to the registry images of the
+# commit being deployed (see deploy/deploy.ps1). Unset, they fall back to the locally built images.
 x-kafka: &kafka
   image: apache/kafka:3.9.1
   restart: unless-stopped
@@ -57,7 +59,7 @@ services:
 
   account-upgrade-backend:
     build: ./account-upgrade-backend
-    image: account-upgrade-backend:latest
+    image: ${BACKEND_IMAGE:-account-upgrade-backend:latest}
     ports:
       - "8080:8080"
     environment:
@@ -85,7 +87,7 @@ services:
 
   account-upgrade-frontend:
     build: ./account-upgrade-frontend
-    image: account-upgrade-frontend:latest
+    image: ${FRONTEND_IMAGE:-account-upgrade-frontend:latest}
     ports:
       - "4200:8080"
     environment:
