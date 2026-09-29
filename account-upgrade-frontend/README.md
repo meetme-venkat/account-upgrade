@@ -6,11 +6,19 @@ An Angular 22 single-page app for [`account-upgrade-backend`](../account-upgrade
 
 | Page | Backend API | What it does |
 |---|---|---|
+| **Sign in** | `POST /api/auth/login` | Username and password (`admin` / `admin` by default). Every other page needs a signed-in user; the header shows who is signed in and a *Sign out* button |
 | **Submit → Real-time** | `POST /api/realtime-upgrade` | Form for one request, with an optional `Idempotency-Key`. Shows the ingestion receipt |
 | **Submit → Batch** | `POST /api/batch-upgrade` | Row editor or raw JSON editor, with a sample batch. Shows the accepted and rejected counts and a receipt for each item |
 | **Processed** | `GET /api/processed-upgrades` | Outcomes with filters for status and `userId`, auto-refresh, summary stats and paging. Each receipt links here, filtered to its user |
 | **Notifications** | `GET /api/notifications` | The backend's mock email outbox, filterable by recipient role or text |
-| Header badge | `GET /actuator/health` | Shows whether the backend is up |
+| Header badge | `GET /actuator/health` | Shows whether the backend is up (public: works before signing in) |
+
+**Authentication.** Signing in returns an access token (JWT) from the backend. `authInterceptor` sends it as
+`Authorization: Bearer <token>` with every `/api` call. When the backend answers `401` (the token is missing,
+expired or invalid), the session ends and the user goes back to the sign-in page, returning to the same page after
+signing in again. The route guard sends signed-out users to the sign-in page. The token is kept in `sessionStorage`,
+so it survives a reload but not closing the tab. The sign-in page only redirects to paths inside the app after
+login, never to another site.
 
 The form validates only the checks the backend enforces at ingestion: `userId` is required and `parentEmail` must be well formed. It leaves the eligibility rules (name, age 18–23, balance ≥ $30) to the backend, so you can submit ineligible requests and watch them be declined. Backend validation errors (RFC 9457 problem details) are shown field by field.
 

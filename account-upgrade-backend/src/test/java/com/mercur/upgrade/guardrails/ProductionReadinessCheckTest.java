@@ -1,6 +1,7 @@
 package com.mercur.upgrade.guardrails;
 
 import com.mercur.upgrade.messaging.kafka.KafkaTopicProperties;
+import com.mercur.upgrade.security.AuthProperties;
 import com.mercur.upgrade.web.CorsProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -8,6 +9,7 @@ import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,12 +27,15 @@ class ProductionReadinessCheckTest {
     private List<String> origins = List.of("https://app.example.com");
     private KafkaTopicProperties kafka = new KafkaTopicProperties(3, 2, 3);
     private PlatformTransactionManager transactionManager = new JdbcTransactionManager(mock(DataSource.class));
+    private String jwtSecret = "a-production-secret-of-at-least-32-bytes";
 
     private ProductionReadinessCheck check() {
         @SuppressWarnings("unchecked")
         ObjectProvider<PlatformTransactionManager> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(transactionManager);
-        return new ProductionReadinessCheck(RATE_LIMIT_ON, new CorsProperties(origins), kafka, provider);
+        AuthProperties auth = new AuthProperties(new AuthProperties.Admin("admin", "admin"),
+                new AuthProperties.Jwt(jwtSecret, "account-upgrade-backend", Duration.ofHours(1)));
+        return new ProductionReadinessCheck(RATE_LIMIT_ON, new CorsProperties(origins), kafka, provider, auth);
     }
 
     @Test
@@ -71,6 +76,14 @@ class ProductionReadinessCheckTest {
 
         transactionManager = null;
         assertThatThrownBy(check()::afterPropertiesSet).hasMessageContaining("found none");
+    }
+
+    @Test
+    void refusesTheDevelopmentJwtSigningKey() {
+        jwtSecret = AuthProperties.DEVELOPMENT_SECRET;
+
+        assertThatThrownBy(check()::afterPropertiesSet)
+                .hasMessageContaining("upgrade.security.jwt.secret is the development key");
     }
 
     @Test

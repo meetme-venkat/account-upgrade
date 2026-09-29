@@ -5,6 +5,7 @@
 #     -e SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/account_upgrade -e SPRING_DATASOURCE_PASSWORD=... \
 #     -e SPRING_KAFKA_BOOTSTRAP_SERVERS=b1:9092,b2:9092,b3:9092 \
 #     -e UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR=3 -e UPGRADE_MESSAGING_KAFKA_MIN_INSYNC_REPLICAS=2 \
+#     -e UPGRADE_SECURITY_JWT_SECRET=<random, 32+ bytes> -e UPGRADE_SECURITY_ADMIN_PASSWORD=... \
 #     account-upgrade-backend
 # Amazon MSK with TLS: -e SPRING_KAFKA_SECURITY_PROTOCOL=SSL
 # Browser access from another origin: -e UPGRADE_WEB_CORS_ALLOWED_ORIGINS=https://app.example.com

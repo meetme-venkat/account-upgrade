@@ -13,7 +13,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** CORS is off unless origins are configured, so a separately hosted frontend must be allowed explicitly. */
+/**
+ * CORS is off unless origins are configured, so a separately hosted frontend must be allowed explicitly. Preflight
+ * requests carry no token: they are answered before authentication.
+ */
 class CorsConfigTest {
 
     private static final String FRONTEND = "http://localhost:4200";
@@ -40,11 +43,12 @@ class CorsConfigTest {
         private MockMvc mockMvc;
 
         @Test
-        void allowsPreflightFromConfiguredOriginIncludingIdempotencyKey() throws Exception {
+        void allowsPreflightFromConfiguredOriginIncludingIdempotencyKeyAndAuthorization() throws Exception {
             mockMvc.perform(preflight())
                     .andExpect(status().isOk())
                     .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, FRONTEND))
-                    .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Idempotency-Key"));
+                    .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS,
+                            "Content-Type, Idempotency-Key, Authorization"));
         }
     }
 
@@ -52,6 +56,6 @@ class CorsConfigTest {
         return options("/api/realtime-upgrade")
                 .header(HttpHeaders.ORIGIN, FRONTEND)
                 .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Content-Type, Idempotency-Key");
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Content-Type, Idempotency-Key, Authorization");
     }
 }

@@ -1,6 +1,7 @@
 package com.mercur.upgrade.guardrails;
 
 import com.mercur.upgrade.messaging.kafka.KafkaTopicProperties;
+import com.mercur.upgrade.security.AuthProperties;
 import com.mercur.upgrade.web.CorsProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,10 @@ import java.util.List;
  *       at least 3, {@code min.insync.replicas} at least 2 and below the replication factor.</li>
  *   <li>The transaction manager must be the JDBC one. Anything else (e.g. a Kafka transaction manager
  *       replacing it) would silently run the decision and outbox writes without a shared transaction.</li>
- *   <li>A disabled rate limit only logs a warning, since it may be enforced at a gateway instead.</li>
+ *   <li>Access tokens must not be signed with the development key from application.yml: anyone with the
+ *       source could forge tokens.</li>
+ *   <li>A disabled rate limit only logs a warning, since it may be enforced at a gateway instead. So do the
+ *       default administrator credentials (admin/admin).</li>
  * </ul>
  */
 @Component
@@ -37,13 +41,15 @@ public class ProductionReadinessCheck implements InitializingBean {
     private final CorsProperties cors;
     private final KafkaTopicProperties kafka;
     private final ObjectProvider<PlatformTransactionManager> transactionManager;
+    private final AuthProperties auth;
 
     public ProductionReadinessCheck(GuardrailProperties guardrails, CorsProperties cors, KafkaTopicProperties kafka,
-                                    ObjectProvider<PlatformTransactionManager> transactionManager) {
+                                    ObjectProvider<PlatformTransactionManager> transactionManager, AuthProperties auth) {
         this.guardrails = guardrails;
         this.cors = cors;
         this.kafka = kafka;
         this.transactionManager = transactionManager;
+        this.auth = auth;
     }
 
     @Override
@@ -61,6 +67,14 @@ public class ProductionReadinessCheck implements InitializingBean {
             violations.add("the JDBC transaction manager is required, found "
                     + (manager == null ? "none" : manager.getClass().getSimpleName())
                     + ". Decision and outbox writes would not share a transaction");
+        }
+
+        if (AuthProperties.DEVELOPMENT_SECRET.equals(auth.jwt().secret())) {
+            violations.add("upgrade.security.jwt.secret is the development key from application.yml: set "
+                    + "UPGRADE_SECURITY_JWT_SECRET to a random value of at least 32 bytes");
+        }
+        if ("admin".equals(auth.admin().username()) && "admin".equals(auth.admin().password())) {
+            log.warn("The administrator uses the default credentials admin/admin: set UPGRADE_SECURITY_ADMIN_PASSWORD");
         }
 
         if (!guardrails.rateLimit().enabled()) {

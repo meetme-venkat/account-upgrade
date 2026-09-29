@@ -61,12 +61,20 @@ jobs:
         run: |
           for i in $(seq 1 90); do curl -fs http://localhost:8080/actuator/health/readiness && exit 0; sleep 2; done
           docker compose logs account-upgrade-backend; exit 1
+      - name: The API needs a login
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/processed-upgrades)" = 401
+          token=$(curl -fs -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"admin"}' | jq -r .accessToken)
+          test -n "$token" && test "$token" != null
+          echo "TOKEN=$token" >> "$GITHUB_ENV"
       - name: Request flows through Kafka, PostgreSQL and the outbox relay
         run: |
           curl -fs -X POST http://localhost:8080/api/realtime-upgrade -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
             -d '{"userId":"ci-e2e","userName":"Ci","age":20,"balance":50,"parentEmail":"p@example.com"}'
           for i in $(seq 1 60); do
-            curl -fs 'http://localhost:8080/api/processed-upgrades?userId=ci-e2e' | tee result.json
+            curl -fs -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/processed-upgrades?userId=ci-e2e' | tee result.json
             grep -q '"notificationSent":true' result.json && exit 0
             sleep 1
           done

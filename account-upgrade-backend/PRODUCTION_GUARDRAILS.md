@@ -14,6 +14,8 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 | Kafka replication factor < 3, `min.insync.replicas` < 2, or minISR ≥ RF | Startup fails | Set `UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR=3` and `_MIN_INSYNC_REPLICAS=2`. Topics then survive a broker failure with every acknowledged write on 2 brokers |
 | The transaction manager isn't the JDBC one | Startup fails | Happens if something else (for example a Kafka transaction manager from `spring.kafka.producer.transaction-id-prefix`) replaces it. The decision and outbox writes would silently stop sharing a transaction |
 | Rate limit disabled | Warning logged | Re-enable it, or make sure a gateway rate-limits `/api` |
+| Access tokens signed with the development key from `application.yml` | Startup fails | Set `UPGRADE_SECURITY_JWT_SECRET` to a random value of at least 32 bytes (`openssl rand -base64 48`) |
+| Administrator still uses the default `admin` / `admin` | Warning logged | Set `UPGRADE_SECURITY_ADMIN_PASSWORD` |
 
 ## 2. Runtime protections
 
@@ -45,6 +47,9 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 |---|---|
 | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` on every response, including errors and `429` responses | `SecurityHeadersFilter` |
 | CORS off by default. When enabled: exact origins, `GET`/`POST` only, only the `Content-Type` and `Idempotency-Key` headers | `CorsConfig` |
+| Every `/api` call needs a valid access token (JWT, HS256): signed with our key, unexpired, from our issuer, with a subject and `scope=api`. Anything else gets `401` (`403` without the scope) as problem+json. Only the login and the actuator endpoints are public | `SecurityConfig` |
+| Login: one generic `401` for a wrong username or password; the password is held only as a BCrypt hash, inputs are length-limited, secrets are never logged or printed. The rate limit runs before authentication, so it throttles password guessing | `AuthController`, `SecurityConfig`, `RateLimitFilter` |
+| Stateless: no sessions, cookies or CSRF tokens; tokens expire after `upgrade.security.jwt.token-ttl` (1 h, bounded to 1 min to 24 h) | `SecurityConfig`, `AuthProperties` |
 | No stack traces, exception names or binding details in error responses | `server.error.*` (prod), `GlobalExceptionHandler` |
 | Actuator limited to `health`, `info` and `metrics`. Health details hidden. No `env`, `beans`, `heapdump` and so on | `management.*` (prod) |
 | Container runs as a non-root user. Heap is bounded (`MaxRAMPercentage=75`) and the JVM exits on OOM so the orchestrator restarts it | `Dockerfile` |
@@ -56,6 +61,7 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 | A request id on every request: the caller's `X-Request-Id` if well formed (`[A-Za-z0-9._-]{1,64}`), otherwise a new UUID. It is echoed in the response and included in every log line as `[id]`. The frontend proxy sends its nginx `$request_id`, so both services log the same id | `RequestIdFilter`, `logging.pattern.correlation` |
 | Liveness and readiness probes: `/actuator/health/liveness`, `/actuator/health/readiness` | `management.endpoint.health.probes` |
 | Metrics: `upgrade.processed`; `upgrade.dead-letters` and `upgrade.notifications.sent` (per instance: sum across instances); `upgrade.notifications.pending` and `upgrade.notifications.failed` (whole table: aggregate with max, not sum); Kafka consumer lag (`kafka.consumer.fetch.manager.records.lag.max`) | `MetricsConfig`, `KafkaConfig`, `OutboxRelay` |
+| Login attempts: `upgrade.auth.logins`, tagged `result=success` / `failure`; failed logins are also logged at WARN | `AuthController` |
 
 ## 5. Build and delivery gates
 
@@ -85,6 +91,9 @@ Run all the gates locally with:
 - [ ] RDS storage is encrypted: the outbox holds email addresses and decision reasons.
 - [ ] Alerts exist on `upgrade.notifications.failed` > 0 and on sustained `upgrade.notifications.pending`.
 - [ ] `UPGRADE_WEB_CORS_ALLOWED_ORIGINS` is empty (the frontend proxies `/api`) or lists exact HTTPS origins.
+- [ ] `UPGRADE_SECURITY_JWT_SECRET` comes from a secret store, is random and at least 32 bytes, and is the same on every replica (any replica must accept any other's tokens). Rotating it logs everyone out.
+- [ ] `UPGRADE_SECURITY_ADMIN_PASSWORD` is set to a strong password (not `admin`).
+- [ ] Alerts exist on a rising `upgrade.auth.logins{result=failure}` rate.
 - [ ] The rate limit fits the expected traffic. It is per instance, so N replicas allow N times the rate. Clients behind one NAT share a bucket.
 - [ ] Liveness and readiness probes point at `/actuator/health/liveness` and `/readiness`.
 - [ ] TLS terminates at the ingress or load balancer, which sets `X-Forwarded-Proto`.

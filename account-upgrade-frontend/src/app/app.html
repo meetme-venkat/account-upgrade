@@ -4,9 +4,11 @@
     <span>Account Upgrades</span>
   </div>
   <nav>
-    <a routerLink="/submit" routerLinkActive="active">Submit</a>
-    <a routerLink="/processed" routerLinkActive="active">Processed</a>
-    <a routerLink="/notifications" routerLinkActive="active">Notifications</a>
+    @if (auth.loggedIn()) {
+      <a routerLink="/submit" routerLinkActive="active">Submit</a>
+      <a routerLink="/processed" routerLinkActive="active">Processed</a>
+      <a routerLink="/notifications" routerLinkActive="active">Notifications</a>
+    }
   </nav>
   <span
     class="health"
@@ -19,6 +21,12 @@
     <span class="dot"></span>
     Backend {{ backendUp() === undefined ? 'checking...' : backendUp() ? 'up' : 'down' }}
   </span>
+  @if (auth.loggedIn()) {
+    <span class="user">
+      <span class="muted">Signed in as</span> {{ auth.username() }}
+      <button type="button" class="btn-secondary" (click)="logout()">Sign out</button>
+    </span>
+  }
 </header>
 
 <main class="container">

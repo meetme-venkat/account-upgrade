@@ -30,7 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "upgrade.messaging.kafka.replication-factor=3",
         "upgrade.messaging.kafka.min-insync-replicas=2",
         "upgrade.guardrails.rate-limit.requests-per-second=1",
-        "upgrade.guardrails.rate-limit.burst=2"})
+        "upgrade.guardrails.rate-limit.burst=2",
+        "upgrade.security.jwt.secret=prod-profile-test-signing-key-0123456789"})
 @ActiveProfiles("prod")
 @AutoConfigureMockMvc
 class ProdProfileIntegrationTest extends PostgresContainerSupport {
@@ -75,13 +76,13 @@ class ProdProfileIntegrationTest extends PostgresContainerSupport {
      */
     @Test
     void rateLimitsEachClient() throws Exception {
-        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.10")).andExpect(status().isOk());
-        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.10")).andExpect(status().isOk());
-        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.10"))
+        mockMvc.perform(authorized(fromIp(get("/api/processed-upgrades"), "192.0.2.10"))).andExpect(status().isOk());
+        mockMvc.perform(authorized(fromIp(get("/api/processed-upgrades"), "192.0.2.10"))).andExpect(status().isOk());
+        mockMvc.perform(authorized(fromIp(get("/api/processed-upgrades"), "192.0.2.10")))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"));
-        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.11"))
+        mockMvc.perform(authorized(fromIp(get("/api/processed-upgrades"), "192.0.2.11")))
                 .andExpect(status().isOk()); // another client still has its own budget
     }
 
@@ -94,13 +95,13 @@ class ProdProfileIntegrationTest extends PostgresContainerSupport {
 
     @Test
     void rejectsUnknownFieldsAndOversizedValues() throws Exception {
-        mockMvc.perform(realtime("192.0.2.20", """
-                        {"userId":"u1","userName":"Ann","age":20,"balance":50,"isAdmin":true}"""))
+        mockMvc.perform(authorized(realtime("192.0.2.20", """
+                        {"userId":"u1","userName":"Ann","age":20,"balance":50,"isAdmin":true}""")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("Unknown field 'isAdmin'"));
 
-        mockMvc.perform(realtime("192.0.2.21", """
-                        {"userId":"%s","userName":"Ann","age":20,"balance":50}""".formatted("x".repeat(65))))
+        mockMvc.perform(authorized(realtime("192.0.2.21", """
+                        {"userId":"%s","userName":"Ann","age":20,"balance":50}""".formatted("x".repeat(65)))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors", hasItem("userId: userId must be at most 64 characters")));
     }

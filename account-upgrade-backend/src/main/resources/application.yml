@@ -52,6 +52,18 @@ server:
   shutdown: graceful
 
 upgrade:
+  security:
+    # Login credentials of the single administrator. Override per environment with
+    # UPGRADE_SECURITY_ADMIN_USERNAME / UPGRADE_SECURITY_ADMIN_PASSWORD (the prod profile warns about admin/admin).
+    admin:
+      username: admin
+      password: admin
+    jwt:
+      # HMAC-SHA256 signing key, at least 32 bytes. Development only: the prod profile refuses to start with this
+      # value. Set UPGRADE_SECURITY_JWT_SECRET, e.g. from `openssl rand -base64 48`.
+      secret: ${UPGRADE_SECURITY_JWT_SECRET:dev-only-jwt-secret-change-me-0123456789abcdef}
+      issuer: account-upgrade-backend
+      token-ttl: 1h
   eligibility:
     min-age: 18
     max-age: 23
