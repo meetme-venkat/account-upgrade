@@ -69,16 +69,27 @@ class ProdProfileIntegrationTest extends PostgresContainerSupport {
                 .andExpect(header().string("X-Request-Id", matchesPattern("[0-9a-f-]{36}")));
     }
 
+    /**
+     * Uses a fast read so the burst (2) is used up within milliseconds: with slow requests (e.g. the first
+     * Kafka publish fetching cluster metadata) the 1/s refill could hand out a token and make this flaky.
+     */
     @Test
     void rateLimitsEachClient() throws Exception {
-        String body = """
-                {"userId":"rl-1","userName":"Ann","age":20,"balance":50}""";
-        mockMvc.perform(realtime("192.0.2.10", body)).andExpect(status().isAccepted());
-        mockMvc.perform(realtime("192.0.2.10", body)).andExpect(status().isAccepted());
-        mockMvc.perform(realtime("192.0.2.10", body))
+        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.10")).andExpect(status().isOk());
+        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.10")).andExpect(status().isOk());
+        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.10"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+        mockMvc.perform(fromIp(get("/api/processed-upgrades"), "192.0.2.11"))
+                .andExpect(status().isOk()); // another client still has its own budget
+    }
+
+    private static MockHttpServletRequestBuilder fromIp(MockHttpServletRequestBuilder request, String ip) {
+        return request.with(r -> {
+            r.setRemoteAddr(ip);
+            return r;
+        });
     }
 
     @Test
