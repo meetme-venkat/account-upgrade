@@ -1,7 +1,7 @@
 # Production guardrail: the frontend cannot merge unless formatting, tests with coverage gate,
 # the budgeted production build, the dependency audit and the container build all pass.
 # See account-upgrade-frontend/PRODUCTION_GUARDRAILS.md.
-# On main it runs as the first gate of cd.yml (workflow_call), so a push is tested once, then built and deployed.
+# On main it runs as the first gate of publish.yml (workflow_call), so a push is tested once, then built and published.
 name: frontend
 
 on:

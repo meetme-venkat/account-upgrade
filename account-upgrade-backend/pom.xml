@@ -19,6 +19,9 @@
 
     <properties>
         <java.version>17</java.version>
+        <!-- Security: Spring Boot 4.1.1 manages Tomcat 11.0.24, which has critical CVEs fixed in 11.0.25
+             (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525). Remove once the Boot version manages >= 11.0.25. -->
+        <tomcat.version>11.0.26</tomcat.version>
         <!-- Set by the JaCoCo agent; empty default keeps surefire's @{argLine} valid when JaCoCo is skipped. -->
         <argLine/>
         <!-- Build guardrail: `mvn verify` fails below these coverage ratios. -->
@@ -125,7 +128,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Dnet.bytebuddy.experimental=true -Xshare:off</argLine>
+                    <!-- UTC: the JDBC driver sends the JVM time zone to PostgreSQL, which rejects legacy zone IDs
+                         (e.g. Asia/Calcutta, what Windows maps IST to). Tests then run the same on every machine. -->
+                    <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Dnet.bytebuddy.experimental=true -Xshare:off -Duser.timezone=UTC</argLine>
                 </configuration>
             </plugin>
             <!-- Build guardrails: supported toolchain, no duplicate or snapshot dependencies in releases. -->
