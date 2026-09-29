@@ -9,7 +9,7 @@
 # Amazon MSK with TLS: -e SPRING_KAFKA_SECURITY_PROTOCOL=SSL
 # Browser access from another origin: -e UPGRADE_WEB_CORS_ALLOWED_ORIGINS=https://app.example.com
 
-FROM eclipse-temurin:21-jdk-alpine AS build
+FROM eclipse-temurin:25-jdk-alpine AS build
 WORKDIR /app
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
@@ -18,7 +18,7 @@ COPY src src
 # Tests and the coverage gate run in CI (mvn verify); the image build only packages.
 RUN ./mvnw -B -q package -DskipTests
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build --chown=root:root /app/target/account-upgrade-service-*.jar app.jar
