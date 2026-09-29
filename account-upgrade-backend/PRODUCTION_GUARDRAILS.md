@@ -30,8 +30,9 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 | **No email without a decision, and no decision without its emails** | Each decision and its outbox rows are written in one transaction. A crash, a DB error or two instances racing on one event roll back cleanly (`ON CONFLICT DO NOTHING` on both tables) | `UpgradeRequestHandlerImpl`, `EmailSenderImpl` | – |
 | Email delivery retries | The relay claims rows with `FOR UPDATE SKIP LOCKED` (no row is claimed twice across instances). Failures back off from 1 s to 5 min, up to 8 attempts, then count as failed. At-least-once, with an `eventId:role` idempotency key | `OutboxRelay` | `upgrade.notification.relay.*` |
 | Outbox retention | Delivered rows are deleted after 7 days (they contain email addresses). Undelivered rows are kept | `OutboxRelay.purgeDelivered` | `upgrade.notification.relay.retention` |
-| Durable topics | Both `upgrade-requests` and `upgrade-requests-dlt` are created with the configured RF and `min.insync.replicas`. **Kafka never changes the RF of an existing topic**: fix older topics by hand or with infrastructure-as-code | `KafkaConfig` | `upgrade.messaging.kafka.*` |
-| Survives short DB outages | Failed records retry with exponential backoff (1 s to 30 s, about 3.5 min in total) before the DLT. Unreadable payloads go to the DLT immediately | `KafkaConfig` error handler | – |
+| Durable topics | Both the upgrade-requests topic and its dead-letter queue (`upgrade-requests-dlq` by default) are created with the configured RF and `min.insync.replicas`. **Kafka never changes the RF of an existing topic**: fix older topics by hand or with infrastructure-as-code | `KafkaConfig` | `upgrade.messaging.kafka.*` |
+| Survives short DB outages | Failed records retry with exponential backoff (1 s to 30 s, about 3.5 min in total) before the dead-letter queue. Unreadable payloads go to it immediately. Failed records are routed to the configured queue explicitly, not by a naming default | `KafkaConfig` error handler | `upgrade.messaging.topics.upgrade-requests-dlq` |
+| Topic names per environment | Topic names come from configuration (`upgrade.messaging.topics.*`, env `UPGRADE_MESSAGING_TOPICS_*`), not code. Startup fails on a missing or illegal name, or a dead-letter queue equal to the main topic | `MessagingProperties` validation | `upgrade.messaging.topics.upgrade-requests`, `...-dlq` |
 | Bounded producer blocking | `max.block.ms` 3 s, `delivery.timeout.ms` 9 s, both below the 10 s publish wait. A `503` means the event was not written | `application.yml` | – |
 | Database timeouts | Pool connection timeout 3 s, `lock_timeout` 5 s, `statement_timeout` 10 s. The DB is not part of readiness, so an RDS blip doesn't pull every instance out of the load balancer | `application.yml` | – |
 | Bounded query | `GET /api/processed-upgrades` returns at most the newest `limit` records (default 1000, max 5000), filtered in SQL | `ProcessedUpgradeController` | – |
@@ -77,6 +78,7 @@ Run all the gates locally with:
 ## Pre-deployment checklist
 
 - [ ] `SPRING_PROFILES_ACTIVE` includes `prod`, with `SPRING_DATASOURCE_*` and `SPRING_KAFKA_BOOTSTRAP_SERVERS` set. On MSK with TLS, also set `SPRING_KAFKA_SECURITY_PROTOCOL=SSL`.
+- [ ] Topic names are set for the environment (`UPGRADE_MESSAGING_TOPICS_UPGRADE_REQUESTS`; the `-dlq` queue follows), and match any ACLs on the cluster.
 - [ ] Topic settings are chosen for peak load: `UPGRADE_MESSAGING_PARTITIONS` is at least the maximum replicas × `UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY` (partitions can only grow), with RF 3 and minISR 2.
 - [ ] RDS `max_connections` ≥ replicas × Hikari pool size (10), plus headroom.
 - [ ] RDS storage is encrypted: the outbox holds email addresses and decision reasons.

@@ -1,10 +1,11 @@
 package com.mercur.upgrade.messaging.kafka;
 
-import com.mercur.upgrade.common.Topics;
 import com.mercur.upgrade.messaging.MessagingProperties;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.TopicConfig;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,8 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 import tools.jackson.core.JacksonException;
+
+import java.util.function.BiFunction;
 
 /**
  * Topic declarations and retry/dead-letter policy.
@@ -30,30 +33,34 @@ public class KafkaConfig {
 
     @Bean
     NewTopic upgradeRequestsTopic(MessagingProperties messaging, KafkaTopicProperties kafka) {
-        return topic(Topics.UPGRADE_REQUESTS, messaging, kafka);
+        return topic(messaging.topics().upgradeRequests(), messaging, kafka);
     }
 
-    /** Same partition count as the main topic: the recoverer publishes to the record's original partition. */
+    /** Same partition count as the main topic: a dead letter keeps its original partition. */
     @Bean
-    NewTopic upgradeRequestsDeadLetterTopic(MessagingProperties messaging, KafkaTopicProperties kafka) {
-        return topic(Topics.UPGRADE_REQUESTS_DLT, messaging, kafka);
+    NewTopic upgradeRequestsDeadLetterQueue(MessagingProperties messaging, KafkaTopicProperties kafka) {
+        return topic(messaging.topics().upgradeRequestsDlq(), messaging, kafka);
     }
 
     /**
      * Retries a failed record with exponential backoff (1 s doubling to 30 s, ~3.5 min in total), so events
-     * survive a short database outage, then publishes it to {@code upgrade-requests-dlt}. Unreadable payloads
-     * cannot succeed on retry and go to the dead-letter topic immediately.
+     * survive a short database outage, then publishes it to the dead-letter queue
+     * ({@code upgrade.messaging.topics.upgrade-requests-dlq}). Unreadable payloads cannot succeed on retry and
+     * go to the dead-letter queue immediately.
      */
     @Bean
-    DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate, MeterRegistry meterRegistry) {
+    DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate, MessagingProperties messaging,
+                                          MeterRegistry meterRegistry) {
         ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(RETRIES);
         backOff.setInitialInterval(1_000);
         backOff.setMultiplier(2.0);
         backOff.setMaxInterval(30_000);
+        String deadLetterQueue = messaging.topics().upgradeRequestsDlq();
         Counter deadLetters = Counter.builder("upgrade.dead-letters")
-                .description("Events moved to " + Topics.UPGRADE_REQUESTS_DLT + " by this instance")
+                .description("Events moved to " + deadLetterQueue + " by this instance")
                 .register(meterRegistry);
-        DeadLetterPublishingRecoverer publisher = new DeadLetterPublishingRecoverer(kafkaTemplate);
+        DeadLetterPublishingRecoverer publisher =
+                new DeadLetterPublishingRecoverer(kafkaTemplate, deadLetterDestination(deadLetterQueue));
         ConsumerRecordRecoverer countingRecoverer = (record, exception) -> {
             publisher.accept(record, exception);
             deadLetters.increment();
@@ -61,6 +68,14 @@ public class KafkaConfig {
         DefaultErrorHandler handler = new DefaultErrorHandler(countingRecoverer, backOff);
         handler.addNotRetryableExceptions(JacksonException.class);
         return handler;
+    }
+
+    /**
+     * The configured dead-letter queue, same partition as the failed record. Explicit rather than the recoverer's
+     * default ({@code <topic>-dlt}), so the destination is always the queue declared above.
+     */
+    static BiFunction<ConsumerRecord<?, ?>, Exception, TopicPartition> deadLetterDestination(String deadLetterQueue) {
+        return (record, exception) -> new TopicPartition(deadLetterQueue, record.partition());
     }
 
     private static NewTopic topic(String name, MessagingProperties messaging, KafkaTopicProperties kafka) {
