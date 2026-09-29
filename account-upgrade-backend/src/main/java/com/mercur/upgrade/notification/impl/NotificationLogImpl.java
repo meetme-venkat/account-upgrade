@@ -1,5 +1,8 @@
-package com.mercur.upgrade.notification;
+package com.mercur.upgrade.notification.impl;
 
+import com.mercur.upgrade.notification.EmailMessage;
+import com.mercur.upgrade.notification.NotificationLog;
+import com.mercur.upgrade.notification.RecipientRole;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -9,12 +12,12 @@ import java.util.List;
 
 /** Recently delivered emails from the outbox, shared by all instances. */
 @Component
-public class JdbcNotificationLog implements NotificationLog {
+public class NotificationLogImpl implements NotificationLog {
 
     private final JdbcClient jdbc;
     private final int capacity;
 
-    public JdbcNotificationLog(JdbcClient jdbc, @Value("${upgrade.notification.outbox-capacity:1000}") int capacity) {
+    public NotificationLogImpl(JdbcClient jdbc, @Value("${upgrade.notification.outbox-capacity:1000}") int capacity) {
         this.jdbc = jdbc;
         this.capacity = capacity;
     }

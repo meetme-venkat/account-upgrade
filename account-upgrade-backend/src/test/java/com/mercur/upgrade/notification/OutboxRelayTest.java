@@ -1,7 +1,8 @@
 package com.mercur.upgrade.notification;
 
-import com.mercur.upgrade.MutableClock;
 import com.mercur.upgrade.IntegrationTestSupport;
+import com.mercur.upgrade.MutableClock;
+import com.mercur.upgrade.notification.impl.EmailSenderImpl;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,7 +27,7 @@ class OutboxRelayTest extends IntegrationTestSupport {
     private static final int MAX_ATTEMPTS = 3;
 
     @Autowired
-    private OutboxEmailSender outbox;
+    private EmailSenderImpl outbox;
 
     @Autowired
     private TransactionOperations transactions;

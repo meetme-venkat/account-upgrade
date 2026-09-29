@@ -1,11 +1,11 @@
-package com.mercur.upgrade.processing;
+package com.mercur.upgrade.processing.impl;
 
 import com.mercur.upgrade.IntegrationTestSupport;
 import com.mercur.upgrade.common.UpgradeRequestedEvent;
 import com.mercur.upgrade.eligibility.EligibilityResult;
 import com.mercur.upgrade.eligibility.EligibilityService;
 import com.mercur.upgrade.notification.NotificationService;
-import com.mercur.upgrade.notification.OutboxEmailSender;
+import com.mercur.upgrade.notification.impl.EmailSenderImpl;
 import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,19 +28,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /** Idempotency of one instance when the same event is delivered concurrently (e.g. Kafka redelivery). */
-class UpgradeRequestProcessorConcurrencyTest extends IntegrationTestSupport {
+class UpgradeRequestHandlerImplConcurrencyTest extends IntegrationTestSupport {
 
     @Autowired
     private ProcessedUpgradeRepository repository;
     @Autowired
-    private OutboxEmailSender outbox;
+    private EmailSenderImpl outbox;
     @Autowired
     private TransactionOperations transactions;
     @Autowired
     private Clock clock;
 
-    private UpgradeRequestProcessor processor(EligibilityService eligibility) {
-        return new UpgradeRequestProcessor(eligibility, new NotificationService(outbox, clock), repository, clock,
+    private UpgradeRequestHandlerImpl processor(EligibilityService eligibility) {
+        return new UpgradeRequestHandlerImpl(eligibility, new NotificationService(outbox, clock), repository, clock,
                 transactions);
     }
 
@@ -53,7 +53,7 @@ class UpgradeRequestProcessorConcurrencyTest extends IntegrationTestSupport {
             bothInside.await(200, TimeUnit.MILLISECONDS); // widen the race window
             return EligibilityResult.fromFailures(List.of());
         });
-        UpgradeRequestProcessor processor = processor(eligibility);
+        UpgradeRequestHandlerImpl processor = processor(eligibility);
         UpgradeRequestedEvent event = event(eligible());
 
         ExecutorService pool = Executors.newFixedThreadPool(8);
@@ -78,7 +78,7 @@ class UpgradeRequestProcessorConcurrencyTest extends IntegrationTestSupport {
         when(eligibility.evaluate(any()))
                 .thenThrow(new IllegalStateException("transient"))
                 .thenReturn(EligibilityResult.fromFailures(List.of()));
-        UpgradeRequestProcessor processor = processor(eligibility);
+        UpgradeRequestHandlerImpl processor = processor(eligibility);
         UpgradeRequestedEvent event = event(eligible());
 
         try {

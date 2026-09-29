@@ -1,5 +1,8 @@
-package com.mercur.upgrade.notification;
+package com.mercur.upgrade.notification.impl;
 
+import com.mercur.upgrade.notification.EmailMessage;
+import com.mercur.upgrade.notification.EmailSender;
+import com.mercur.upgrade.notification.OutboxRelay;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
@@ -15,11 +18,11 @@ import java.time.ZoneOffset;
  * for the first transaction and then inserts nothing, instead of failing with a unique violation.
  */
 @Component
-public class OutboxEmailSender implements EmailSender {
+public class EmailSenderImpl implements EmailSender {
 
     private final JdbcClient jdbc;
 
-    public OutboxEmailSender(JdbcClient jdbc) {
+    public EmailSenderImpl(JdbcClient jdbc) {
         this.jdbc = jdbc;
     }
 

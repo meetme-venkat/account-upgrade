@@ -1,10 +1,13 @@
-package com.mercur.upgrade.persistence;
+package com.mercur.upgrade.persistence.impl;
 
 import com.mercur.upgrade.IntegrationTestSupport;
 import com.mercur.upgrade.common.RequestSource;
 import com.mercur.upgrade.notification.EmailMessage;
-import com.mercur.upgrade.notification.OutboxEmailSender;
 import com.mercur.upgrade.notification.RecipientRole;
+import com.mercur.upgrade.notification.impl.EmailSenderImpl;
+import com.mercur.upgrade.persistence.ProcessedUpgrade;
+import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
+import com.mercur.upgrade.persistence.ProcessingStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -14,13 +17,13 @@ import java.util.List;
 import static com.mercur.upgrade.TestRequests.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class JdbcProcessedUpgradeRepositoryTest extends IntegrationTestSupport {
+class ProcessedUpgradeRepositoryImplTest extends IntegrationTestSupport {
 
     @Autowired
     private ProcessedUpgradeRepository repository;
 
     @Autowired
-    private OutboxEmailSender outbox;
+    private EmailSenderImpl outbox;
 
     private static ProcessedUpgrade decision(String eventId, String userId, ProcessingStatus status, String... reasons) {
         return new ProcessedUpgrade(eventId, userId, RequestSource.BATCH, status, List.of(reasons), true, NOW);
@@ -28,7 +31,7 @@ class JdbcProcessedUpgradeRepositoryTest extends IntegrationTestSupport {
 
     @Test
     void isTheJdbcAdapter() {
-        assertThat(repository).isInstanceOf(JdbcProcessedUpgradeRepository.class);
+        assertThat(repository).isInstanceOf(ProcessedUpgradeRepositoryImpl.class);
     }
 
     @Test

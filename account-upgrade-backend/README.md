@@ -10,15 +10,15 @@ the eligibility rules, notifies the user (and the parent, where relevant), store
 
 ```
 POST /api/batch-upgrade ──┐
-                          ├─► IngestionService ──► KafkaEventPublisher ──► topic "upgrade-requests"
+                          ├─► IngestionService ──► EventPublisherImpl ──► topic "upgrade-requests"
 POST /api/realtime-upgrade┘   (validate, 202)        (key = userId, acks=all)     │
                                                                                    ▼
-                          UpgradeRequestProcessor  (Kafka consumer group, N threads per instance)
-                            ┌─ one PostgreSQL transaction ──────────────────────────────────────┐
+                          UpgradeRequestHandlerImpl  (Kafka consumer group, N threads per instance)
+                            ┌─ one PostgreSQL transaction ───────────────────────────────────────┐
                             │ 1. idempotency check (eventId)                                     │
-                            │ 2. EligibilityService ──► [UserNameRule, AgeRangeRule, MinBalance] │
-                            │ 3. NotificationService ──► OutboxEmailSender (notification_outbox) │
-                            │ 4. JdbcProcessedUpgradeRepository (processed_upgrades)             │
+                            │ 2. EligibilityService ──► EligibilityRule impls (eligibility.impl) │
+                            │ 3. NotificationService ──► EmailSenderImpl (notification_outbox)   │
+                            │ 4. ProcessedUpgradeRepositoryImpl (processed_upgrades)             │
                             └────────────────────────────────────────────────────────────────────┘
                                                                                    │
                           OutboxRelay (every instance, FOR UPDATE SKIP LOCKED) ──► EmailChannel (logs)
@@ -35,10 +35,16 @@ Each package has a single responsibility and could be split into its own microse
 | `messaging` | Topic ports (`EventPublisher`, `UpgradeRequestHandler`) and the Kafka adapter: publisher, listener, topics, retry and dead-letter policy |
 | `processing` | Consumer that orchestrates eligibility → notification → persistence in one transaction |
 | `eligibility` | Pluggable rules engine; thresholds configurable in `application.yml` |
-| `notification` | Builds the user and parent emails. The transactional outbox (`OutboxEmailSender`), the `OutboxRelay` that delivers them, and the `EmailChannel` port (log-only today) |
+| `notification` | Builds the user and parent emails. The transactional outbox (`EmailSenderImpl`), the `OutboxRelay` that delivers them, and the `EmailChannel` port (log-only today) |
 | `persistence` | `ProcessedUpgradeRepository` port and its PostgreSQL adapter (Flyway schema in `db/migration`) |
 | `query` | Read API for processed requests |
 | `guardrails`, `web` | Production guardrails, CORS, global error handling (RFC 9457 problem details) |
+
+### Code conventions
+
+- **Ports and implementations:** modules talk through interfaces (`ProcessedUpgradeRepository`, `EventPublisher`, `EmailSender`, ...). A class implementing one of the application's own interfaces is named `<Name>Impl` and lives in an `impl` package of its module, for example `persistence.impl.ProcessedUpgradeRepositoryImpl` or `messaging.kafka.impl.EventPublisherImpl`. The only implementation of an interface is named after it (`EmailSender` → `EmailSenderImpl`); several implementations of one interface keep a descriptive name (`AgeRangeRuleImpl`, `UserNameRuleImpl`). Other modules depend on the interface, never on an `impl` package.
+- **Framework types keep framework names:** classes implementing only Spring, Kafka or servlet interfaces (`CorsConfig`, `ProductionReadinessCheck`, the filters) are not `Impl` classes.
+- **Enforced:** `ImplementationNamingConventionTest` fails the build on a misnamed or misplaced implementation, and on anything else in an `impl` package. Test doubles are exempt.
 
 ### Event processing guarantees
 
@@ -79,11 +85,11 @@ All rules are evaluated, and every failure reason is recorded.
 
 | Rule | Condition | Config key |
 |---|---|---|
-| `UserNameRule` | `userName` not null or blank | – |
-| `AgeRangeRule` | 18 ≤ `age` ≤ 23 | `upgrade.eligibility.min-age` / `max-age` |
-| `MinimumBalanceRule` | `balance` ≥ 30 | `upgrade.eligibility.min-balance` |
+| `UserNameRuleImpl` | `userName` not null or blank | – |
+| `AgeRangeRuleImpl` | 18 ≤ `age` ≤ 23 | `upgrade.eligibility.min-age` / `max-age` |
+| `MinimumBalanceRuleImpl` | `balance` ≥ 30 | `upgrade.eligibility.min-balance` |
 
-To add a rule, create another `@Component` that implements `EligibilityRule`. It is picked up automatically.
+To add a rule, create another `@Component` that implements `EligibilityRule`, named `<Name>RuleImpl` in `eligibility.impl`. It is picked up automatically.
 
 **Validation versus eligibility:** only structural problems are rejected at ingestion with `400`: a missing `userId`, a malformed `parentEmail`, invalid JSON or an empty batch. Business-rule failures, such as an empty `userName`, go through processing. They are stored as `INELIGIBLE` and the user is notified.
 
@@ -222,14 +228,15 @@ More sample requests are in [`requests.http`](requests.http), which you can run 
 |---|---|
 | `EligibilityRulesTest` | Each rule, including boundaries (17/18/23/24, 29.99/30) and null or blank input |
 | `EligibilityServiceTest` | Mockito rules: all pass; all failures are collected with no short-circuit; the three real rules together |
-| `UpgradeRequestProcessorTest` | Mockito: eligible and ineligible outcomes are persisted, notification failure is recorded, duplicate events are skipped |
+| `UpgradeRequestHandlerImplTest` | Mockito: eligible and ineligible outcomes are persisted, notification failure is recorded, duplicate events are skipped |
 | `NotificationServiceTest` | Mockito: user only, user and parent, decline with reasons, partial delivery failure |
 | `IngestionServiceTest` | Mockito: event creation, real-time failure propagation, partial batch failure |
 | `RateLimitFilterTest` / `ProductionReadinessCheckTest` / `KafkaConfigTest` | Rate limiting; CORS, Kafka RF/minISR and transaction-manager startup rules; topic and DLT durability settings |
+| `ImplementationNamingConventionTest` | Every implementation of an application interface is a `<Name>Impl` in an `impl` package, and `impl` packages hold nothing else (see [Code conventions](#code-conventions)) |
 | `UpgradeFlowIntegrationTest` *(IT)* | HTTP → Kafka → decision + outbox → relay → query, with `notificationSent` turning true after delivery; validation errors; `Idempotency-Key` retries; `413` for oversized bodies; the query limit |
 | `TransactionalProcessingTest` *(IT)* | **Two instances racing on one event commit one decision and one email per recipient**; a failed decision save rolls back the emails and the retry starts clean; redeliveries are skipped |
-| `UpgradeRequestProcessorConcurrencyTest` *(IT)* | 8 concurrent deliveries on one instance produce 1 record and 1 email; the claim is released after a failure so a retry can proceed |
-| `JdbcProcessedUpgradeRepositoryTest` *(IT)* | Store once (`ON CONFLICT`), field round trip, store order with equal timestamps, filtered and limited `find`, `notificationSent` derived from the outbox |
+| `UpgradeRequestHandlerImplConcurrencyTest` *(IT)* | 8 concurrent deliveries on one instance produce 1 record and 1 email; the claim is released after a failure so a retry can proceed |
+| `ProcessedUpgradeRepositoryImplTest` *(IT)* | Store once (`ON CONFLICT`), field round trip, store order with equal timestamps, filtered and limited `find`, `notificationSent` derived from the outbox |
 | `OutboxRelayTest` *(IT)* | Delivers and marks rows, drains several batches, backoff then gives up at max attempts, a failing row doesn't block others, **two relays in parallel deliver each row exactly once**, retention purges only delivered rows |
 | `ProdProfileIntegrationTest` *(IT, 3 brokers)* | The prod profile end to end: startup guardrails, security headers, request IDs, rate limiting, strict input, locked-down actuator |
 | `CorsConfigTest` *(IT)* | CORS off by default; configured origins get a preflight answer |
@@ -240,6 +247,6 @@ More sample requests are in [`requests.http`](requests.http), which you can run 
 
 - **Idempotency keys:** a key reused with a different payload is not detected, and the second request is silently de-duplicated. A production API would store a hash of the payload with each key and answer a mismatch with `422`.
 - **Query paging:** `GET /api/processed-upgrades` is capped by `limit`. Browsing further back needs cursor pagination (`?before=<seq>`).
-- **Email:** implement `EmailChannel` with an SES or SMTP adapter. `LoggingEmailChannel` only logs.
+- **Email:** implement `EmailChannel` with an SES or SMTP adapter. `EmailChannelImpl` only logs.
 - **Kafka publish circuit breaker:** when Kafka is down, each ingestion request still waits up to the producer's 3 s `max.block.ms`. A breaker would fail fast.
 - **Batch ingestion:** very large loads would move to Spring Batch reading from files or object storage.

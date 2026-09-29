@@ -25,9 +25,9 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 | Batch size cap | `400` above 10,000 items | `IngestionController` | – |
 | Field length limits | `userId` ≤ 64, `userName` ≤ 100, `parentEmail` ≤ 254 characters, else `400` | `UpgradeRequest` bean validation | – |
 | Unknown JSON fields rejected | `400 Unknown field 'x'` instead of silently dropping a client typo | `spring.jackson.deserialization.fail-on-unknown-properties` (prod) | – |
-| Broker unavailable | The producer gives up within 3–9 s: `503` for real-time requests, `REJECTED` receipts for batch items. Nothing is half-written | `KafkaEventPublisher`, producer timeouts | – |
-| Idempotent retries | `Idempotency-Key` gives deterministic event ids, so an event is processed and notified once | `IngestionService`, `UpgradeRequestProcessor` | – |
-| **No email without a decision, and no decision without its emails** | Each decision and its outbox rows are written in one transaction. A crash, a DB error or two instances racing on one event roll back cleanly (`ON CONFLICT DO NOTHING` on both tables) | `UpgradeRequestProcessor`, `OutboxEmailSender` | – |
+| Broker unavailable | The producer gives up within 3–9 s: `503` for real-time requests, `REJECTED` receipts for batch items. Nothing is half-written | `EventPublisherImpl`, producer timeouts | – |
+| Idempotent retries | `Idempotency-Key` gives deterministic event ids, so an event is processed and notified once | `IngestionService`, `UpgradeRequestHandlerImpl` | – |
+| **No email without a decision, and no decision without its emails** | Each decision and its outbox rows are written in one transaction. A crash, a DB error or two instances racing on one event roll back cleanly (`ON CONFLICT DO NOTHING` on both tables) | `UpgradeRequestHandlerImpl`, `EmailSenderImpl` | – |
 | Email delivery retries | The relay claims rows with `FOR UPDATE SKIP LOCKED` (no row is claimed twice across instances). Failures back off from 1 s to 5 min, up to 8 attempts, then count as failed. At-least-once, with an `eventId:role` idempotency key | `OutboxRelay` | `upgrade.notification.relay.*` |
 | Outbox retention | Delivered rows are deleted after 7 days (they contain email addresses). Undelivered rows are kept | `OutboxRelay.purgeDelivered` | `upgrade.notification.relay.retention` |
 | Durable topics | Both `upgrade-requests` and `upgrade-requests-dlt` are created with the configured RF and `min.insync.replicas`. **Kafka never changes the RF of an existing topic**: fix older topics by hand or with infrastructure-as-code | `KafkaConfig` | `upgrade.messaging.kafka.*` |
@@ -63,6 +63,7 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 | Coverage | Line or branch coverage drops below 85% (currently about 89% and 87%) | JaCoCo `check` in `pom.xml` (`coverage.*.minimum`) |
 | Toolchain | Java < 17 or Maven < 3.9 | Maven Enforcer |
 | Dependencies | Duplicate declarations or unconverged transitive versions. SNAPSHOT dependencies in a release build | Maven Enforcer |
+| Code structure | A class implementing an application interface isn't named `<Name>Impl` or isn't in an `impl` package of its module, or an `impl` package holds anything else (framework-only implementations such as filters and `@Configuration` classes are exempt) | `ImplementationNamingConventionTest` |
 | Supported JDKs | The build breaks on Java 17 or on Java 21 | `.github/workflows/backend.yml` matrix |
 | Image behaviour | Against the compose stack (PostgreSQL + 3 Kafka brokers), the prod image doesn't become ready, a request doesn't flow through to a delivered notification, or RF 1 is accepted | `backend.yml` `image` job |
 | Dependency freshness | – (weekly update PRs for Maven, the base image and Actions) | `.github/dependabot.yml` |
