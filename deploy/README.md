@@ -76,6 +76,7 @@ in a clone works the same.
 | Update after changing `pipeline.ps1` | Run `install-pipeline.ps1` again (adding or removing a service does not need it: the images to build come from `docker-compose.yml`) |
 | Remove | `install-pipeline.ps1 -Uninstall` |
 | See what's running | `docker compose -p account-upgrade ps` |
+| Validate the running stack end to end | `validate.ps1`: 47 checks (containers, schema, Kafka, login and tokens, eligibility rules, validation errors, idempotency, notifications, security headers, rate limit). Exits 1 if any fails. `-SkipInfrastructure` for a stack running elsewhere, `-SkipRateLimit` to avoid the request burst |
 
 Run the scripts with `powershell -NoProfile -ExecutionPolicy Bypass -File <script> [options]`.
 
