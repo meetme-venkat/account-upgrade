@@ -1,4 +1,4 @@
-# Grafana Alloy: ships the logs of every pod in account-upgrade to Loki. It reads them through the Kubernetes API
+# Grafana Alloy: ships the logs of every pod in account-upgrade to Loki and Splunk. It reads them through the Kubernetes API
 # (loki.source.kubernetes) instead of the nodes' log files, so it needs no host access, and it may only list pods and
 # read their logs in that one namespace (a Role, not a ClusterRole).
 apiVersion: v1
@@ -95,7 +95,52 @@ data:
       stage.labels {
         values = { level = "" }
       }
-      forward_to = [loki.write.loki.receiver]
+      forward_to = [loki.write.loki.receiver, otelcol.receiver.loki.splunk.receiver]
+    }
+
+    // The same lines to Splunk's HTTP Event Collector, with the labels (app, pod, level...) as indexed fields.
+    // Independent of Loki: if Splunk is down, its queue fills and drops, and Loki keeps receiving.
+    otelcol.receiver.loki "splunk" {
+      output {
+        logs = [otelcol.processor.transform.sourcetype.input]
+      }
+    }
+
+    // Only the backend logs JSON: its lines go in as _json (fields extracted when indexed). Splunk rejects any other
+    // line sent as _json, so the rest (Kafka, PostgreSQL, nginx) goes in as plain text.
+    otelcol.processor.transform "sourcetype" {
+      error_mode = "ignore"
+      log_statements {
+        context    = "log"
+        statements = [
+          `set(attributes["com.splunk.sourcetype"], "_json") where attributes["app"] == "account-upgrade-backend"`,
+        ]
+      }
+      output {
+        logs = [otelcol.processor.batch.splunk.input]
+      }
+    }
+
+    otelcol.processor.batch "splunk" {
+      output {
+        logs = [otelcol.exporter.splunkhec.splunk.input]
+      }
+    }
+
+    // A community component (enabled by --feature.community-components.enabled).
+    otelcol.exporter.splunkhec "splunk" {
+      client {
+        endpoint = "https://splunk-hec.monitoring.svc.cluster.local:8088/services/collector"
+        // Splunk's HEC certificate is self-signed; the traffic stays inside the cluster.
+        insecure_skip_verify = true
+      }
+      splunk {
+        token      = sys.env("SPLUNK_HEC_TOKEN")
+        index      = "main"
+        source     = "account-upgrade"
+        // Default for lines without their own sourcetype (see otelcol.processor.transform.sourcetype).
+        sourcetype = "kube:container"
+      }
     }
 
     loki.write "loki" {
@@ -142,6 +187,13 @@ spec:
             - --storage.path=/var/lib/alloy
             - --server.http.listen-addr=0.0.0.0:12345
             - --disable-reporting
+            - --feature.community-components.enabled
+          env:
+            - name: SPLUNK_HEC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: splunk
+                  key: hec-token
           ports:
             - name: http
               containerPort: 12345

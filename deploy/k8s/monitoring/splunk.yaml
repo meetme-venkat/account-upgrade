@@ -1,0 +1,158 @@
+# Splunk Enterprise (standalone): receives the same platform logs as Loki, through its HTTP Event Collector (HEC),
+# from Alloy. Web UI on http://127.0.0.1:8000 (user admin); the admin password and the HEC token are in the secret
+# "splunk", created by install.sh with random values.
+#
+# Licence: the two SPLUNK_*_TERMS/ARGS variables below accept the Splunk General Terms
+# (https://www.splunk.com/en_us/legal/splunk-general-terms.html) and the Splunk licence, as the image requires; the
+# owner of this deployment accepted them. It starts as a 60-day Enterprise trial; after that, switch to the Free
+# licence (Settings -> Licensing), which indexes up to 500 MB/day and has NO login: keep port 8000 on 127.0.0.1.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: splunk-data
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: splunk
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+# HEC, inside the cluster only: Alloy sends here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: splunk-hec
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: splunk
+spec:
+  selector:
+    app.kubernetes.io/name: splunk
+  ports:
+    - name: hec
+      port: 8088
+      targetPort: hec
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: splunk-web
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: splunk
+spec:
+  # Rancher Desktop publishes LoadBalancer ports on 127.0.0.1. On a cloud cluster use ClusterIP (port-forward or an
+  # internal ingress): a LoadBalancer would be public, and billed.
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: splunk
+  ports:
+    - name: web
+      port: 8000
+      targetPort: web
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: splunk
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: splunk
+spec:
+  replicas: 1
+  # One Splunk per data volume: stop the old pod before starting the new one.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: splunk
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: splunk
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      # Lets splunkd flush its indexes on shutdown.
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        # The image starts as "ansible" and uses sudo to become "splunk"; running as splunk directly needs neither
+        # root nor privilege escalation. Group 999 (ansible) owns the directory where the image records its state.
+        runAsNonRoot: true
+        runAsUser: 41812
+        runAsGroup: 41812
+        supplementalGroups: [999]
+        fsGroup: 41812
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: splunk
+          image: splunk/splunk:10.0.1
+          env:
+            - name: SPLUNK_GENERAL_TERMS
+              value: --accept-sgt-current-at-splunk-com
+            - name: SPLUNK_START_ARGS
+              value: --accept-license
+            # The files already belong to splunk; changing their owner would need root.
+            - name: SPLUNK_HOME_OWNERSHIP_ENFORCEMENT
+              value: "false"
+            - name: SPLUNK_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: splunk
+                  key: admin-password
+            - name: SPLUNK_HEC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: splunk
+                  key: hec-token
+          ports:
+            - name: web
+              containerPort: 8000
+            - name: hec
+              containerPort: 8088
+            - name: mgmt
+              containerPort: 8089
+          # The image's own health check: splunkd answers on its management port once setup has finished.
+          startupProbe:
+            exec:
+              command: [/sbin/checkstate.sh]
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [/sbin/checkstate.sh]
+            periodSeconds: 30
+            timeoutSeconds: 30
+          livenessProbe:
+            tcpSocket:
+              port: mgmt
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Splunk writes all over /opt/splunk and its setup under /opt: a read-only root filesystem is not practical.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Configuration (users, HEC token, licence) and indexes survive restarts.
+            - name: data
+              mountPath: /opt/splunk/etc
+              subPath: etc
+            - name: data
+              mountPath: /opt/splunk/var
+              subPath: var
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: splunk-data
