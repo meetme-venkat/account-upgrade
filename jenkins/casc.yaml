@@ -1,0 +1,60 @@
+# Jenkins configuration as code (configuration-as-code plugin), applied at every start: changes made in the UI are
+# replaced by this file on the next restart. ${VAR} values come from the pod's environment (jenkins/k8s/jenkins.yaml).
+jenkins:
+  systemMessage: "Account Upgrade CI/CD. Configured from jenkins/casc.yaml; the pipeline is the repository's Jenkinsfile."
+  # Builds run on the controller: a single-user local setup. Use agents for anything shared.
+  numExecutors: 2
+  mode: NORMAL
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          name: Administrator
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: true
+  markupFormatter: plainText
+
+security:
+  # The job below is defined here, by the administrator; no sandbox approval needed for it.
+  globalJobDslSecurityConfiguration:
+    useScriptSecurity: false
+
+unclassified:
+  location:
+    url: "${JENKINS_URL:-http://127.0.0.1:8090/}"
+
+jobs:
+  - script: |
+      pipelineJob('account-upgrade') {
+        description('Tests, builds, scans and deploys ${PIPELINE_BRANCH:-main} to the local Kubernetes cluster, then runs the end-to-end tests. Rolls back on failure.')
+        properties {
+          pipelineTriggers {
+            triggers {
+              // A new commit is picked up within 2 minutes; no webhook (nothing needs to reach this machine).
+              pollSCM {
+                scmpoll_spec('H/2 * * * *')
+              }
+            }
+          }
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('${PIPELINE_REPO:-https://github.com/meetme-venkat/account-upgrade.git}')
+                }
+                branches('*/${PIPELINE_BRANCH:-main}')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(true)
+          }
+        }
+      }

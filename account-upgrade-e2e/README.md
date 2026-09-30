@@ -34,7 +34,7 @@ Each is a system property (`-De2e.baseUrl=...`), else the environment variable, 
 | `e2e.baseUrl` | `E2E_BASE_URL` | `http://127.0.0.1:4200` (the UI; the backend directly also works) |
 | `e2e.apiUrl` | `E2E_API_URL` | `http://127.0.0.1:8080` (the backend, for the rate-limit check) |
 | `e2e.adminUsername` / `e2e.adminPassword` | `UPGRADE_SECURITY_ADMIN_USERNAME` / `_PASSWORD` | `admin` / `admin` |
-| `e2e.kubeContext` | `ACCOUNT_UPGRADE_KUBE_CONTEXT` | `rancher-desktop` |
+| `e2e.kubeContext` | `ACCOUNT_UPGRADE_KUBE_CONTEXT` | `rancher-desktop`; `in-cluster` in a pod (the pod's service account, as in the Jenkins pipeline) |
 | `e2e.namespace` | `E2E_NAMESPACE` | `account-upgrade` |
 | `e2e.topic` | `UPGRADE_MESSAGING_TOPICS_UPGRADE_REQUESTS` | `upgrade-requests` |
 | `e2e.processingTimeout` (seconds) | `E2E_PROCESSING_TIMEOUT` | `60` |

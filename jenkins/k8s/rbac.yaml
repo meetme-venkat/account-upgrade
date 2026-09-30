@@ -1,0 +1,68 @@
+# What the pipeline may do in the cluster: manage the platform in namespace account-upgrade (kubectl apply, rollouts,
+# the schema Job, secrets, logs, and exec into postgres-0 / kafka-0 for the end-to-end infrastructure checks), and
+# create or update that one namespace. Nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins
+  namespace: jenkins
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: account-upgrade-deployer
+  namespace: account-upgrade
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, pods/exec, services, secrets, configmaps, persistentvolumeclaims, events]
+    verbs: ["*"]
+  - apiGroups: [apps]
+    resources: [statefulsets, deployments, replicasets]
+    verbs: ["*"]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: ["*"]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer
+  namespace: account-upgrade
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: account-upgrade-deployer
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: jenkins
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: account-upgrade-namespace
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [account-upgrade]
+    verbs: [get, patch, update]
+  # Create cannot be limited to a name; it only matters on a cluster the platform was never deployed to.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-account-upgrade-namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: account-upgrade-namespace
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: jenkins

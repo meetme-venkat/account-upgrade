@@ -19,8 +19,10 @@ final class Kubectl {
 
     /** Stdout of {@code kubectl <args>}; fails the test with kubectl's error output if the command fails. */
     static String run(String... args) {
-        List<String> command = new ArrayList<>(List.of(
-                "kubectl", "--context", E2eSettings.KUBE_CONTEXT, "--namespace", E2eSettings.NAMESPACE));
+        List<String> command = new ArrayList<>(List.of("kubectl", "--namespace", E2eSettings.NAMESPACE));
+        if (!E2eSettings.KUBE_CONTEXT.equals(E2eSettings.IN_CLUSTER)) {
+            command.addAll(List.of("--context", E2eSettings.KUBE_CONTEXT));
+        }
         command.addAll(List.of(args));
         try {
             Process process = new ProcessBuilder(command).start();

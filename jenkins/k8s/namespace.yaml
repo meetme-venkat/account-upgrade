@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins
+  labels:
+    # Jenkins mounts the node's Docker socket (hostPath) to build images, which no restricted profile allows.
+    # That makes Jenkins as powerful as the node: fine on a single-user local machine, not on a shared cluster.
+    pod-security.kubernetes.io/enforce: privileged
