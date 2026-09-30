@@ -154,7 +154,7 @@ emails in the table, would have triggered the same plan. Batching made it visibl
    under any large email backlog once a week of delivered emails accumulates.
 4. **Next bottleneck: the email relay.** It claims 20 emails per transaction and updates them one by one. Marking a
    batch sent with one `UPDATE ... WHERE id IN (...)`, and a larger batch size, would be the next step. The emails
-   then finish 15–20 s after the last decision instead of in step with it.
+   then finish 15–20 s after the last decision instead of in step with it. Done since, +80 %: [relay-throughput.md](relay-throughput.md).
 5. **Retention matters.** The outbox keeps delivered rows 7 days. A heavy week means millions of rows. The fix makes
    the relay independent of that, but the retention period is worth sizing to the real traffic.
 

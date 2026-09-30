@@ -1,7 +1,8 @@
 # Peak load test: 10,000 real-time requests
 
 > The same test at 100,000 requests, with its own before and after: [peak-100k.md](peak-100k.md); and batching the
-> consumers' database writes, measured the same way: [batch-writes.md](batch-writes.md).
+> consumers' database writes, measured the same way: [batch-writes.md](batch-writes.md); and the email relay alone:
+> [relay-throughput.md](relay-throughput.md).
 
 **Question.** What happens when 10,000 upgrade requests arrive at once, each as its own real-time call, and what
 should be sized for it: Kafka, the database connections, consumer threads, or pods?
