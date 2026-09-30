@@ -10,3 +10,5 @@ Rows are appended by `SoakTest` (`account-upgrade-e2e`, `mvnw verify -Psoak`), o
 | Run at | Events sent | Accepted | Rejected | Processed | Lost | Notified | Dead letters | Seconds | Events/s | JVM threads before -> after | Heap used (MB) | Note |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-09-30 12:32 | 4000 | 4000 | 0 | 4000 | 0 | 4000 | 0 | 26.5 | 151 | 67/72 -> 67/72 | 39/49 | verification run of the Java port (2 x 2,000) |
+| 2026-09-30 13:02 | 4000 | 4000 | 0 | 4000 | 0 | 4000 | 0 | 8.0 | 501 | 35/35 -> 35/35 | 38/45 | after publishing batches together (2 x 2,000) |
+| 2026-09-30 13:04 | 100000 | 100000 | 0 | 100000 | 0 | 59179 | 0 | 103.5 | 966 | 35/35 -> 35/35 | 62/57 | default size, after publishing batches together |
