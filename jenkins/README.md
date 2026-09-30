@@ -79,6 +79,7 @@ kubectl --context rancher-desktop -n jenkins get secret jenkins-admin -o jsonpat
 | Faster manual run | `SKIP_TESTS` and/or `SKIP_SCAN` |
 | Pause / resume | The job's *Disable Project* / *Enable* |
 | Build another branch | Change `PIPELINE_BRANCH` in [`k8s/kustomization.yaml`](k8s/kustomization.yaml), then `kubectl apply -k jenkins/k8s` |
+| Change the admin password | Update the secret, **then**, once that has returned, restart (Jenkins reads it only at start): `kubectl -n jenkins create secret generic jenkins-admin --from-literal=password=<new> --dry-run=client -o yaml \| kubectl apply -f -`, then `kubectl -n jenkins delete pod jenkins-0`. A restart interrupts a running build |
 | Change the job or security | Edit `casc.yaml`, rebuild the image (step 1), restart: `kubectl -n jenkins delete pod jenkins-0` |
 | Update Jenkins or its plugins | Change the version in `Dockerfile` (and in `k8s/jenkins.yaml`), rebuild, apply. Plugins resolve to their latest compatible versions at every image build |
 | Logs of Jenkins itself | `kubectl -n jenkins logs jenkins-0` |
