@@ -8,6 +8,8 @@ import com.mercur.upgrade.notification.NotificationService;
 import com.mercur.upgrade.persistence.ProcessedUpgrade;
 import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
 import com.mercur.upgrade.persistence.ProcessingStatus;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,6 +17,7 @@ import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,17 +50,25 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
     private final TransactionOperations transactions;
     /** Event ids currently being processed; bounded by the number of consumer threads. */
     private final Set<String> inProgress = ConcurrentHashMap.newKeySet();
+    /** Decisions committed by this instance, per status: {@code upgrade.decisions}. */
+    private final Map<ProcessingStatus, Counter> decisions = new EnumMap<>(ProcessingStatus.class);
 
     public UpgradeRequestHandlerImpl(EligibilityService eligibilityService,
                                    NotificationService notificationService,
                                    ProcessedUpgradeRepository repository,
                                    Clock clock,
-                                   TransactionOperations transactions) {
+                                   TransactionOperations transactions,
+                                   MeterRegistry meterRegistry) {
         this.eligibilityService = eligibilityService;
         this.notificationService = notificationService;
         this.repository = repository;
         this.clock = clock;
         this.transactions = transactions;
+        for (ProcessingStatus status : ProcessingStatus.values()) {
+            decisions.put(status, Counter.builder("upgrade.decisions").tag("status", status.name())
+                    .description("Decisions stored by this instance (counted once their transaction commits)")
+                    .register(meterRegistry));
+        }
     }
 
     @Override
@@ -70,7 +81,7 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
             return;
         }
         try {
-            transactions.executeWithoutResult(status -> processOnce(event));
+            count(transactions.execute(status -> processOnce(event)));
         } finally {
             inProgress.remove(event.eventId()); // released on failure too, so a retry can process it
         }
@@ -93,7 +104,7 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
         }
         try {
             if (!claimed.isEmpty()) {
-                transactions.executeWithoutResult(status -> processBatch(claimed));
+                count(transactions.execute(status -> processBatch(claimed)));
             }
         } finally {
             claimed.forEach(event -> inProgress.remove(event.eventId()));
@@ -103,9 +114,9 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
     /**
      * Three statements for the whole batch: which events are already stored, the new decisions (one insert that
      * returns what it stored), and the emails of the decisions stored here. A decision another instance stored
-     * first is left out, and so are its emails.
+     * first is left out, and so are its emails. Returns the decisions stored here.
      */
-    private void processBatch(List<UpgradeRequestedEvent> events) {
+    private List<ProcessedUpgrade> processBatch(List<UpgradeRequestedEvent> events) {
         Set<String> alreadyStored =
                 repository.findStoredEventIds(events.stream().map(UpgradeRequestedEvent::eventId).toList());
         Map<UpgradeRequestedEvent, EligibilityResult> decisions = new LinkedHashMap<>();
@@ -124,7 +135,7 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
                     result.reasons(), true, clock.instant()));
         }
         if (records.isEmpty()) {
-            return;
+            return List.of();
         }
         Set<String> stored = repository.saveAllIfAbsent(records);
         if (stored.size() < records.size()) {
@@ -133,21 +144,24 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
             decisions.keySet().removeIf(event -> !stored.contains(event.eventId()));
         }
         notificationService.notifyDecisions(decisions);
-        records.stream().filter(record -> stored.contains(record.eventId())).forEach(record ->
+        List<ProcessedUpgrade> storedRecords = records.stream().filter(record -> stored.contains(record.eventId()))
+                .toList();
+        storedRecords.forEach(record ->
                 log.debug("Processed event {} for user {}: {} {}", record.eventId(), record.userId(), record.status(),
                         record.reasons()));
         log.info("Processed a batch of {} events ({} skipped as duplicates)", stored.size(),
                 events.size() - stored.size());
+        return storedRecords;
     }
 
     /**
      * The decision first, then its emails, only if this transaction stored the decision: a decision another instance
-     * stored first gets no second set of emails, as in {@link #processBatch}.
+     * stored first gets no second set of emails, as in {@link #processBatch}. Returns the decision if stored here.
      */
-    private void processOnce(UpgradeRequestedEvent event) {
+    private List<ProcessedUpgrade> processOnce(UpgradeRequestedEvent event) {
         if (repository.existsByEventId(event.eventId())) {
             log.info("Skipping duplicate event {}", event.eventId());
-            return;
+            return List.of();
         }
         EligibilityResult result = eligibilityService.evaluate(event.request());
         // notificationSent: recorded in the outbox by this transaction or not at all; the repository derives the
@@ -163,10 +177,18 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
 
         if (!repository.saveIfAbsent(processed)) {
             log.warn("Event {} was stored concurrently by another consumer", event.eventId());
-            return;
+            return List.of();
         }
         notificationService.notifyDecision(event, result);
         log.info("Processed event {} for user {}: {} {}", event.eventId(), processed.userId(),
                 processed.status(), processed.reasons());
+        return List.of(processed);
+    }
+
+    /** Called once the transaction has committed: a rolled-back decision is never counted. */
+    private void count(List<ProcessedUpgrade> committed) {
+        if (committed != null) {
+            committed.forEach(record -> decisions.get(record.status()).increment());
+        }
     }
 }

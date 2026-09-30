@@ -127,4 +127,9 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      # Latency buckets, so Prometheus can compute percentiles (p95, p99) across instances.
+      percentiles-histogram:
+        http.server.requests: true

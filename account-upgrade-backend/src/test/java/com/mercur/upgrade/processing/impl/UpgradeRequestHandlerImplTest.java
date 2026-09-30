@@ -1,6 +1,7 @@
 package com.mercur.upgrade.processing.impl;
 
 import com.mercur.upgrade.common.RequestSource;
+import com.mercur.upgrade.common.UpgradeRequest;
 import com.mercur.upgrade.common.UpgradeRequestedEvent;
 import com.mercur.upgrade.eligibility.EligibilityResult;
 import com.mercur.upgrade.eligibility.EligibilityService;
@@ -8,6 +9,7 @@ import com.mercur.upgrade.notification.NotificationService;
 import com.mercur.upgrade.persistence.ProcessedUpgrade;
 import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
 import com.mercur.upgrade.persistence.ProcessingStatus;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.transaction.support.TransactionOperations;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -29,6 +32,7 @@ import static com.mercur.upgrade.TestRequests.eligible;
 import static com.mercur.upgrade.TestRequests.event;
 import static com.mercur.upgrade.TestRequests.request;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
@@ -49,12 +53,14 @@ class UpgradeRequestHandlerImplTest {
     @Mock
     private ProcessedUpgradeRepository repository;
 
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+
     private UpgradeRequestHandlerImpl processor;
 
     @BeforeEach
     void setUp() {
         processor = new UpgradeRequestHandlerImpl(eligibilityService, notificationService, repository,
-                Clock.fixed(NOW, ZoneOffset.UTC), TransactionOperations.withoutTransaction());
+                Clock.fixed(NOW, ZoneOffset.UTC), TransactionOperations.withoutTransaction(), meters);
     }
 
     @Test
@@ -184,6 +190,41 @@ class UpgradeRequestHandlerImplTest {
 
         verify(repository, never()).saveAllIfAbsent(any());
         verifyNoInteractions(eligibilityService, notificationService);
+    }
+
+    @Test
+    void countsTheDecisionsItStoredPerStatus() {
+        UpgradeRequestedEvent approved = event(eligible());
+        UpgradeRequestedEvent declined = event(request("Carol", 40, "5"));
+        UpgradeRequestedEvent theirs = event(new UpgradeRequest("u-4", "Dave", 20, new BigDecimal("50"), null));
+        when(eligibilityService.evaluate(approved.request())).thenReturn(EligibilityResult.fromFailures(List.of()));
+        when(eligibilityService.evaluate(declined.request()))
+                .thenReturn(EligibilityResult.fromFailures(List.of("too old")));
+        when(eligibilityService.evaluate(theirs.request())).thenReturn(EligibilityResult.fromFailures(List.of()));
+        // "theirs" was stored first by another consumer: not counted here.
+        when(repository.saveAllIfAbsent(any())).thenReturn(Set.of(approved.eventId(), declined.eventId()));
+
+        processor.handleAll(List.of(approved, declined, theirs));
+
+        assertThat(decisions(ProcessingStatus.ELIGIBLE)).isEqualTo(1);
+        assertThat(decisions(ProcessingStatus.INELIGIBLE)).isEqualTo(1);
+    }
+
+    @Test
+    void doesNotCountADecisionWhoseTransactionFailed() {
+        UpgradeRequestedEvent event = event(eligible());
+        EligibilityResult result = EligibilityResult.fromFailures(List.of());
+        when(eligibilityService.evaluate(event.request())).thenReturn(result);
+        when(repository.saveIfAbsent(any())).thenReturn(true);
+        when(notificationService.notifyDecision(event, result)).thenThrow(new IllegalStateException("outbox down"));
+
+        assertThatThrownBy(() -> processor.handle(event)).isInstanceOf(IllegalStateException.class);
+
+        assertThat(decisions(ProcessingStatus.ELIGIBLE)).isZero();
+    }
+
+    private double decisions(ProcessingStatus status) {
+        return meters.get("upgrade.decisions").tag("status", status.name()).counter().count();
     }
 
     private List<ProcessedUpgrade> savedBatch() {
