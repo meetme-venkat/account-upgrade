@@ -1,4 +1,5 @@
-# Full stack, production-shaped, on one machine:
+# Full stack, production-shaped, on one machine, for local development. (The deployment runs on Kubernetes:
+# deploy/k8s, deploy/README.md. The CD pipeline still reads the services to build from this file.)
 #   docker compose up --build
 #   UI:  http://localhost:4200     API: http://localhost:8080
 #
@@ -9,8 +10,9 @@
 #   3. account-upgrade-frontend  only once the backend is healthy
 # If the schema job fails, nothing after it starts. Each service can also be built and run on its own.
 # The credentials below are for local use only.
-# DB_SCHEMA_IMAGE / BACKEND_IMAGE / FRONTEND_IMAGE override the app images; the CD pipeline sets them to the registry images of the
-# commit being deployed (see deploy/deploy.ps1). Unset, they fall back to the locally built images.
+# DB_SCHEMA_IMAGE / BACKEND_IMAGE / FRONTEND_IMAGE override the app images (e.g. a release's registry images).
+# Unset, they fall back to the locally built images.
+# It publishes the same ports (8080, 4200) as the Kubernetes deployment: run one or the other.
 x-kafka: &kafka
   image: apache/kafka:3.9.1
   restart: unless-stopped

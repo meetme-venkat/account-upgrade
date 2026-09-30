@@ -1,0 +1,49 @@
+# account-update-db-schema: Liquibase brings the schema up to date, then exits (success = schema current).
+# A Job's pod template cannot change, so deploy.ps1 deletes the previous run's Job and creates it again on every
+# deployment (a no-op when the schema is already current), and rolls out the backend only if it succeeds.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: account-update-db-schema
+  labels:
+    app.kubernetes.io/name: account-update-db-schema
+    app.kubernetes.io/component: db-schema
+spec:
+  # Retries cover PostgreSQL still starting; a changeset that fails keeps failing and fails the deployment.
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: account-update-db-schema
+        app.kubernetes.io/component: db-schema
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: liquibase
+          image: account-update-db-schema
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LIQUIBASE_COMMAND_URL
+              value: jdbc:postgresql://postgres:5432/account_upgrade
+            - name: LIQUIBASE_COMMAND_USERNAME
+              value: postgres
+            - name: LIQUIBASE_COMMAND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: account-upgrade-secrets
+                  key: postgres-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

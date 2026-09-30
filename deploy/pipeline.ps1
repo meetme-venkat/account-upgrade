@@ -9,7 +9,8 @@
         ─► build images: database schema (Liquibase), backend, frontend (whose tests and budgeted build run
            inside its image build)
         ─► Trivy scan (no fixable CRITICAL vulnerabilities)
-        ─► deploy.ps1 (schema job, then backend, then frontend; health checks, smoke test, rollback on failure)
+        ─► deploy.ps1 to Kubernetes (schema job, then backend, then frontend; rolling updates, smoke test,
+           rollback on failure)
 
     The images to build are read from the commit's own docker-compose.yml (every service with a build context), so
     the pipeline works for any commit, whatever services it has.
@@ -22,7 +23,8 @@
         powershell -NoProfile -ExecutionPolicy Bypass -File deploy\pipeline.ps1 -Commit <sha>  # redeploy / roll back
         powershell -NoProfile -ExecutionPolicy Bypass -File deploy\pipeline.ps1 -Status        # what is deployed
 
-    Needs: git, a JDK 17+ on PATH (backend tests), and Rancher Desktop running with the dockerd (moby) engine.
+    Needs: git, a JDK 17+ on PATH (backend tests), and Rancher Desktop running with the dockerd (moby) engine and
+    Kubernetes enabled (its k3s runs the images built here, no registry needed).
     Written for Windows PowerShell 5.1.
 #>
 [CmdletBinding()]
@@ -45,7 +47,10 @@ param(
 
     [string]$StateDir = (Join-Path $env:LOCALAPPDATA 'account-upgrade\pipeline'),
 
-    [int]$KeepLogs = 50
+    [int]$KeepLogs = 50,
+
+    # The cluster deploy.ps1 deploys to.
+    [string]$KubeContext = $(if ($env:ACCOUNT_UPGRADE_KUBE_CONTEXT) { $env:ACCOUNT_UPGRADE_KUBE_CONTEXT } else { 'rancher-desktop' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,8 +127,9 @@ try { $lock = [System.IO.File]::Open((Join-Path $StateDir 'pipeline.lock'), 'Ope
 catch { Write-Host 'Another pipeline run is in progress.'; return }
 
 try {
-    # Nothing can be built or deployed without the engine; try again next time rather than fail the commit.
+    # Nothing can be built or deployed without the engine and the cluster; try again next time rather than fail the commit.
     $null = Get-NativeOutput docker @('version', '--format', '{{.Server.Version}}') $StateDir
+    $null = Get-NativeOutput kubectl @('--context', $KubeContext, 'get', '--raw', '/readyz') $StateDir
 
     if (-not (Test-Path (Join-Path $repoDir '.git'))) {
         Invoke-Native git @('clone', '--quiet', '--no-checkout', $RepoUrl, $repoDir) $StateDir
@@ -207,8 +213,11 @@ try {
     # The commit's own deploy script and compose file, so the stack definition always matches its images.
     $stage = 'deploy'
     Write-Stage 'Deploying'
-    Invoke-Native powershell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $deployScript,
+    $deployArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $deployScript,
         '-Tag', $target, '-Registry', 'local', '-SkipPull')
+    # Commits from before the move to Kubernetes deploy with docker compose and take no context.
+    if (Select-String -Path $deployScript -Pattern '\[string\]\$Context' -Quiet) { $deployArgs += '-Context', $KubeContext }
+    Invoke-Native powershell $deployArgs
 }
 catch {
     $result = "FAILED ($stage)"

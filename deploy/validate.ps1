@@ -7,8 +7,8 @@
     Read-only on the infrastructure; on the API it logs in and submits a handful of uniquely named test requests
     (user IDs start with "validate-<timestamp>-"), which stay in the database like any other request.
 
-      Infrastructure  containers healthy, schema job exited 0, schema changelog applied, Kafka topics replicated,
-                      dead-letter queue empty, consumer lag 0
+      Infrastructure  (Kubernetes) workloads fully ready, schema job succeeded, schema changelog applied, Kafka
+                      topics replicated, dead-letter queue empty, consumer lag 0
       Authentication  no token 401, wrong password 401, admin login returns a token, token 200, tampered token 401
       Ingestion       batch and real-time requests accepted
       Validation      missing userId, invalid email, empty batch, malformed JSON, unknown field: 400 each
@@ -33,13 +33,15 @@ param(
 
     [string]$AdminPassword = $(if ($env:UPGRADE_SECURITY_ADMIN_PASSWORD) { $env:UPGRADE_SECURITY_ADMIN_PASSWORD } else { 'admin' }),
 
-    [string]$ProjectName = 'account-upgrade',
+    [string]$Context = $(if ($env:ACCOUNT_UPGRADE_KUBE_CONTEXT) { $env:ACCOUNT_UPGRADE_KUBE_CONTEXT } else { 'rancher-desktop' }),
+
+    [string]$Namespace = 'account-upgrade',
 
     [string]$Topic = 'upgrade-requests',
 
     [int]$ProcessingTimeoutSec = 60,
 
-    # Skip the docker checks, e.g. when validating a stack that runs elsewhere.
+    # Skip the Kubernetes checks, e.g. when validating a stack that runs elsewhere.
     [switch]$SkipInfrastructure,
 
     # Skip the burst of requests that trips the rate limiter (it briefly throttles this machine's IP).
@@ -95,49 +97,50 @@ function Invoke-Api([string]$Method, [string]$Path, $Body = $null, [hashtable]$H
 # ConvertFrom-Json in 5.1 returns a JSON array as one object; unroll it into a real array.
 function ConvertTo-Array($Value) { return @($Value | ForEach-Object { $_ }) }
 
-function Get-DockerOutput {
+function Get-KubectlOutput {
     $ErrorActionPreference = 'Continue'
-    $out = & docker @args 2>$null
+    $out = & kubectl --context $Context --namespace $Namespace @args 2>$null
     if ($LASTEXITCODE -ne 0) { return $null }
     return $out
+}
+
+# "ready/desired" replicas of a workload, or 'missing'.
+function Get-Readiness([string]$Kind, [string]$Name) {
+    $out = Get-KubectlOutput get $Kind $Name -o 'jsonpath={.status.readyReplicas}/{.spec.replicas}'
+    if (-not $out) { return 'missing' }
+    $parts = "$out".Split('/')
+    return "$(if ($parts[0]) { $parts[0] } else { 0 })/$($parts[1])"
 }
 
 Write-Host "Validating $BaseUrl (test users: $prefix-*)"
 
 if (-not $SkipInfrastructure) {
     Write-Section 'Infrastructure'
-    $containers = @(Get-DockerOutput compose -p $ProjectName ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}')
-    $state = @{}
-    foreach ($line in $containers) { if ($line) { $parts = $line.Split('|'); $state[$parts[0]] = $parts } }
-    foreach ($service in 'postgres', 'account-upgrade-backend', 'account-upgrade-frontend') {
-        $s = $state[$service]
-        Test-Check "$service is running and healthy" $(if ($s) { "$($s[1])/$($s[2])" } else { 'missing' }) 'running/healthy'
-    }
-    foreach ($broker in 'kafka-1', 'kafka-2', 'kafka-3') {
-        $s = $state[$broker]
-        Test-Check "$broker is running" $(if ($s) { $s[1] } else { 'missing' }) 'running'
-    }
-    $schema = $state['account-update-db-schema']
-    Test-Check 'schema job completed successfully' $(if ($schema) { "$($schema[1]) (exit $($schema[3]))" } else { 'missing' }) 'exited (exit 0)'
+    Test-Check 'postgres: ready/desired pods' (Get-Readiness statefulset postgres) '1/1'
+    Test-Check 'kafka brokers: ready/desired pods' (Get-Readiness statefulset kafka) '3/3'
+    Test-Check 'account-upgrade-backend: ready/desired pods' (Get-Readiness deployment account-upgrade-backend) '2/2'
+    Test-Check 'account-upgrade-frontend: ready/desired pods' (Get-Readiness deployment account-upgrade-frontend) '2/2'
+    $schema = Get-KubectlOutput get job account-update-db-schema -o 'jsonpath={.status.succeeded}'
+    Test-Check 'schema job succeeded' $(if ($null -eq $schema) { 'missing' } elseif ("$schema" -eq '1') { 'yes' } else { 'no' }) 'yes'
 
-    $postgres = "$ProjectName-postgres-1"
-    $unapplied = Get-DockerOutput exec $postgres psql -U postgres -d account_upgrade -tAc "select count(*) from databasechangelog where exectype not in ('EXECUTED', 'MARK_RAN')"
-    $applied = Get-DockerOutput exec $postgres psql -U postgres -d account_upgrade -tAc 'select count(*) from databasechangelog'
+    $postgres = @('exec', 'postgres-0', '--', 'psql', '-U', 'postgres', '-d', 'account_upgrade', '-tAc')
+    $unapplied = Get-KubectlOutput @postgres "select count(*) from databasechangelog where exectype not in ('EXECUTED', 'MARK_RAN')"
+    $applied = Get-KubectlOutput @postgres 'select count(*) from databasechangelog'
     Test-Check 'schema changelog applied (changesets recorded)' $(if ([int]"$applied" -gt 0 -and [int]"$unapplied" -eq 0) { 'yes' } else { "applied=$applied, other=$unapplied" }) 'yes'
-    $tables = Get-DockerOutput exec $postgres psql -U postgres -d account_upgrade -tAc "select count(*) from pg_tables where schemaname = 'public' and tablename in ('processed_upgrades', 'notification_outbox')"
+    $tables = Get-KubectlOutput @postgres "select count(*) from pg_tables where schemaname = 'public' and tablename in ('processed_upgrades', 'notification_outbox')"
     Test-Check 'application tables exist' "$tables".Trim() 2
 
-    $kafka = "$ProjectName-kafka-1-1"
-    $topics = @(Get-DockerOutput exec $kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe)
+    $kafka = @('exec', 'kafka-0', '--')
+    $topics = @(Get-KubectlOutput @kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe)
     foreach ($name in $Topic, "$Topic-dlq") {
         $line = $topics | Where-Object { $_ -match "^Topic: $([regex]::Escape($name))\s" } | Select-Object -First 1
         $replication = if ($line -and $line -match 'ReplicationFactor: (\d+)') { $Matches[1] } else { 'missing' }
         Test-Check "topic $name replication factor" $replication 3
     }
-    $offsets = @(Get-DockerOutput exec $kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic "$Topic-dlq")
+    $offsets = @(Get-KubectlOutput @kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic "$Topic-dlq")
     $deadLetters = ($offsets | Where-Object { $_ } | ForEach-Object { [long]($_.Split(':')[2]) } | Measure-Object -Sum).Sum
     Test-Check 'dead-letter queue is empty' $deadLetters 0
-    $groups = @(Get-DockerOutput exec $kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group upgrade-eligibility)
+    $groups = @(Get-KubectlOutput @kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group upgrade-eligibility)
     $lag = ($groups | Where-Object { $_ -match "^\S+\s+$([regex]::Escape($Topic))\s" } |
         ForEach-Object { $col = ($_ -split '\s+')[5]; if ($col -match '^\d+$') { [long]$col } else { 0 } } | Measure-Object -Sum).Sum
     Test-Check 'consumer lag on the upgrade-requests topic' $lag 0
@@ -226,12 +229,13 @@ foreach ($header in 'Content-Security-Policy', 'X-Frame-Options', 'X-Content-Typ
 }
 if ($SkipRateLimit) { Write-Host '  (rate limit check skipped)' }
 else {
-    # 80 concurrent requests without a token: the limiter (burst 40) answers some with 429 before authentication runs.
+    # 200 concurrent requests without a token: each backend replica (burst 40, its own bucket) answers some with 429
+    # before authentication runs.
     Add-Type -AssemblyName System.Net.Http
-    [System.Net.ServicePointManager]::DefaultConnectionLimit = 100
+    [System.Net.ServicePointManager]::DefaultConnectionLimit = 200
     $client = New-Object System.Net.Http.HttpClient
     try {
-        $tasks = @(1..80 | ForEach-Object { $client.GetAsync("$ApiUrl/api/processed-upgrades") })
+        $tasks = @(1..200 | ForEach-Object { $client.GetAsync("$ApiUrl/api/processed-upgrades") })
         [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]$tasks)
         $codes = $tasks | ForEach-Object { [int]$_.Result.StatusCode }
         $throttled = @($codes | Where-Object { $_ -eq 429 }).Count
