@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installs or updates the monitoring stack (Prometheus, Grafana, Kafka and PostgreSQL exporters). Idempotent.
+# Installs or updates the monitoring stack (Prometheus, Loki, Alloy, Grafana, Kafka and PostgreSQL exporters).
+# Idempotent.
 #
 #   deploy/k8s/monitoring/install.sh            bash, Git Bash or Linux, with kubectl access to the cluster
 #
@@ -27,10 +28,12 @@ if ! k -n monitoring get secret grafana-admin >/dev/null 2>&1; then
 fi
 
 k kustomize . | k apply -f -
-# Picks up changes to the scrape configuration (a ConfigMap change alone does not restart the pod).
-k -n monitoring rollout restart deployment/prometheus
+# Picks up configuration changes (a ConfigMap change alone does not restart a pod). Grafana too: it reads its
+# data sources only at startup.
+k -n monitoring rollout restart deployment/prometheus deployment/loki deployment/alloy deployment/grafana
 for target in "account-upgrade deployment/kafka-exporter" "account-upgrade deployment/postgres-exporter" \
-              "monitoring deployment/prometheus" "monitoring deployment/grafana"; do
+              "monitoring deployment/prometheus" "monitoring deployment/loki" "monitoring deployment/alloy" \
+              "monitoring deployment/grafana"; do
     set -- $target
     k -n "$1" rollout status "$2" --timeout=180s
 done

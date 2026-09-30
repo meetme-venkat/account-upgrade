@@ -1,6 +1,6 @@
-# Monitoring: Prometheus and Grafana
+# Monitoring: Prometheus, Loki and Grafana
 
-Live metrics and one dashboard for the platform, in the same cluster. Everything here is open source and free; the
+Live metrics, searchable logs and one dashboard for the platform, in the same cluster. Everything here is open source and free; the
 only cost is the cluster capacity it uses.
 
 ## What runs
@@ -8,7 +8,9 @@ only cost is the cluster capacity it uses.
 | Component | Namespace | Does | Resources (request / limit) |
 |---|---|---|---|
 | Prometheus `v3.5.0` | `monitoring` | Scrapes every 15 s, keeps 7 days (at most 4 GB) on a 5 Gi volume | 256 / 768 MiB |
-| Grafana `12.1.1` | `monitoring` | The "Account Upgrade" dashboard, on http://127.0.0.1:3000 | 128 / 384 MiB |
+| Loki `3.5.3` | `monitoring` | Stores the logs of every pod in `account-upgrade` for 7 days on a 5 Gi volume | 256 / 768 MiB |
+| Alloy `v1.10.2` | `monitoring` | Ships those logs to Loki, reading them through the Kubernetes API | 96 / 384 MiB |
+| Grafana `12.1.1` | `monitoring` | The "Account Upgrade" dashboard and log search, on http://127.0.0.1:3000 | 128 / 384 MiB |
 | kafka-exporter `v1.9.0` | `account-upgrade` | Topic offsets and consumer-group lag | 32 / 96 MiB |
 | postgres-exporter `v0.17.1` | `account-upgrade` | Transactions, connections, rows written | 32 / 96 MiB |
 
@@ -54,6 +56,7 @@ The dashboard is provisioned from [`dashboards/account-upgrade.json`](dashboards
 | Notifications | Emails sent/s per pod; emails waiting and failed |
 | Database | Connection pool per pod (active, pending, size); PostgreSQL commits and rollbacks/s; connections and rows written/s |
 | Backend JVM | CPU, heap, threads and GC pause time per pod |
+| Logs | Backend log lines/s by level; backend warnings and errors; logs of everything else (Kafka, PostgreSQL, frontend, jobs) |
 
 The metrics come from the backend (`/actuator/prometheus`):
 
@@ -74,19 +77,38 @@ The metrics come from the backend (`/actuator/prometheus`):
 In Kubernetes the backend logs one JSON object per line, in the Elastic Common Schema (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` in
 [backend.yaml](../base/backend.yaml)). The request id is a field (`requestId`), so logs can be searched by request:
 
-```sh
-kubectl -n account-upgrade logs -l app.kubernetes.io/name=account-upgrade-backend --since=10m | grep '"requestId":"<id>"'
+**How logs reach Loki**
+- **Collection:** Alloy follows the logs of every pod in `account-upgrade` through the Kubernetes API. That needs no
+  access to the nodes, and its permissions are a Role in that one namespace: list pods and read their logs.
+- **Labels:** each line is labelled with `namespace`, `app`, `component`, `pod` and `container`. Backend lines also
+  get `level` (INFO, WARN, ERROR), so errors can be selected without parsing every line.
+- **Resuming:** Alloy records how far it has read each pod. After a restart it continues from there instead of
+  re-sending.
+
+**Searching.** In Grafana, open **Explore**, choose **Loki**, then query:
+
+```
+{app="account-upgrade-backend", level="ERROR"}                               errors from any backend pod
+{app="account-upgrade-backend"} | json | requestId="<id>"                    one request, across pods
+{app="account-upgrade-backend"} | json | log_logger=~".*OutboxRelay"         the email relay
+sum by (level) (rate({app="account-upgrade-backend"}[1m]))                   log lines/s by level
+{app="kafka"} |= "ERROR"                                                     broker errors
 ```
 
-This stack doesn't collect logs. Grafana Loki, or Splunk through its OpenTelemetry Collector and HTTP Event Collector,
-can ingest these lines as they are, without parsing rules.
+`| json` turns every field of a backend line into a label for that query. Examples: `log_logger`,
+`process_thread_name`, `message`, `requestId`.
+
+**Volume.** The backend logs one line per email sent, so a 100,000-request run writes about 250,000 lines. Loki's
+limits are raised for that (16 MB/s). In production, lowering `EmailChannelImpl`'s logger to WARN would remove
+most of the volume.
 
 ## On AWS (EKS)
 
 The manifests run unchanged. The software costs nothing, but its infrastructure does:
 
-- **Node capacity:** about 1–1.5 GiB of memory and 0.2 vCPU.
-- **Storage:** an EBS volume for Prometheus (5 Gi).
+- **Node capacity:** about 1.5–2.5 GiB of memory and 0.3 vCPU.
+- **Storage:** EBS volumes for Prometheus and Loki (5 Gi each). Loki is normally pointed at an S3 bucket instead
+  (`object_store: s3`), which is cheaper per GB and removes the volume.
 - **Grafana's Service:** change it to `ClusterIP` and use `kubectl port-forward` or an internal ingress. As a
   `LoadBalancer` it would create a public, billed load balancer.
 - **Database user:** give postgres-exporter its own database role with only `pg_monitor` (a schema changeset) instead

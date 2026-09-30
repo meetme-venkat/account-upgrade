@@ -1,4 +1,4 @@
-# Grafana with Prometheus as its data source and the "Account Upgrade" dashboard, both provisioned from this
+# Grafana with Prometheus and Loki as data sources and the "Account Upgrade" dashboard, all provisioned from this
 # directory (edits made in the UI to the provisioned dashboard are not kept: change dashboards/account-upgrade.json).
 # UI: http://127.0.0.1:3000 on Rancher Desktop. The admin password is in the secret grafana-admin, created by
 # install.sh with a random value.
@@ -19,6 +19,13 @@ data:
         isDefault: true
         jsonData:
           timeInterval: 15s
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki.monitoring.svc.cluster.local:3100
+        jsonData:
+          maxLines: 1000
   dashboards.yaml: |
     apiVersion: 1
     providers:

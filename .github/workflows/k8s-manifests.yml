@@ -1,4 +1,4 @@
-# Guardrail: the Kubernetes manifests (the platform's and Jenkins') cannot merge unless they render (kustomize)
+# Guardrail: the Kubernetes manifests (the platform's, monitoring's and Jenkins') cannot merge unless they render (kustomize)
 # and every resource is valid against the Kubernetes API schemas (kubeconform, strict: unknown or misspelled fields
 # fail). See deploy/README.md and jenkins/README.md.
 name: k8s-manifests
@@ -26,6 +26,8 @@ jobs:
           kubectl kustomize deploy/k8s/base > rendered.yaml
           echo --- >> rendered.yaml
           kubectl kustomize jenkins/k8s >> rendered.yaml
+          echo --- >> rendered.yaml
+          kubectl kustomize deploy/k8s/monitoring >> rendered.yaml
 
       - name: Validate against the Kubernetes schemas
         run: |
