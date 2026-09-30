@@ -1,6 +1,6 @@
 # Publish: every push to main passes both CI workflows, then its images are built, scanned and published to GHCR.
-# Deployment is not done here: deploy/pipeline.ps1 on the Rancher Desktop machine builds and deploys main by itself
-# (see deploy/README.md). The GHCR images are release artifacts for other environments.
+# Deployment is not done here: the Jenkins in the local Kubernetes cluster builds and deploys main by itself
+# (see jenkins/README.md). The GHCR images are release artifacts for other environments.
 #
 #   push to main ─► db-schema CI ─┐
 #                  backend CI ───┤

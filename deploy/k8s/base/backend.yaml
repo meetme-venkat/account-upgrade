@@ -26,7 +26,7 @@ metadata:
 spec:
   replicas: 2
   revisionHistoryLimit: 5
-  # A rollout that makes no progress for this long fails (and deploy.ps1 rolls back).
+  # A rollout that makes no progress for this long fails (and the pipeline rolls back).
   progressDeadlineSeconds: 240
   strategy:
     type: RollingUpdate

@@ -1,4 +1,6 @@
 > **Historical record.** These results were measured against the earlier in-memory broker and store, which have since been removed; the service now runs on Kafka and PostgreSQL. The findings still explain several design choices.
+>
+> The live corner cases and the soak test now live in [`account-upgrade-e2e`](../account-upgrade-e2e/README.md#corner-cases-and-soak) as JUnit suites (`CornerCasesTest`, `SoakTest`) that run against the Kubernetes deployment; the PowerShell scripts below were removed. Their current results: [`corner-cases.md`](../account-upgrade-e2e/test-results/corner-cases.md), [`soak-history.md`](../account-upgrade-e2e/test-results/soak-history.md). The files in this folder's `test-results/` are the historical runs.
 
 # Test Report: Corner Cases, Multi-threading, Concurrency and Memory
 
@@ -11,8 +13,8 @@ Test results for the account upgrade service. The service was tested against the
 | File | Content | Updated by |
 |---|---|---|
 | `TEST_REPORT.md` (this file) | Findings, defects, fixes and analysis | By hand, when there is something new to explain |
-| [`test-results/corner-cases.md`](test-results/corner-cases.md) | Latest result of all 65 live corner cases | Rewritten on every run of `scripts/corner-cases.ps1` |
-| [`test-results/soak-history.md`](test-results/soak-history.md) | One row per soak run: accepted, rejected, lost, dead letters, throughput, threads, memory | A row is appended on every run of `scripts/soak.ps1` |
+| [`test-results/corner-cases.md`](test-results/corner-cases.md) | Result of all 65 live corner cases (historical) | Was rewritten on every run of the former `scripts/corner-cases.ps1` |
+| [`test-results/soak-history.md`](test-results/soak-history.md) | One row per soak run: accepted, rejected, lost, dead letters, throughput, threads, memory (historical) | A row was appended on every run of the former `scripts/soak.ps1` |
 
 The generated files hold the raw, always-current numbers. This report explains what they mean.
 
@@ -278,14 +280,10 @@ Results:
 .\mvnw.cmd -DskipTests package
 java -jar target\account-upgrade-service-1.0.0.jar
 
-# In a second terminal: 65 live corner cases.
-# Needs a freshly started app (it checks exact counts and refuses to run otherwise).
-# Rewrites test-results\corner-cases.md.
-.\scripts\corner-cases.ps1
-
-# Soak test: 10 batches of 10,000 events. Appends a row to test-results\soak-history.md.
-# Use a new -Prefix for each run on the same app instance, and -Note to label the row.
-.\scripts\soak.ps1 -Batches 10 -BatchSize 10000 -Prefix run3 -Note "after changing X"
+# The live corner cases and the soak test (formerly scripts\corner-cases.ps1 and scripts\soak.ps1) are now JUnit
+# suites in account-upgrade-e2e, run against the Kubernetes deployment:
+#   cd ..\account-upgrade-e2e; .\mvnw.cmd verify -Pcorner-cases
+#   cd ..\account-upgrade-e2e; .\mvnw.cmd verify -Psoak "-De2e.soak.note=after changing X"
 
 # Heap check after a full GC (replace <pid> with the app's process ID)
 jcmd <pid> GC.run

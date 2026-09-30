@@ -1,0 +1,24 @@
+# Jenkins in the local Kubernetes cluster (namespace jenkins), allowed to deploy to namespace account-upgrade only.
+#   kubectl --context rancher-desktop apply -k jenkins/k8s
+# Needs the image local/account-upgrade-jenkins (jenkins/Dockerfile) and the secret jenkins-admin; see jenkins/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: account-upgrade-ci
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - jenkins.yaml
+
+configMapGenerator:
+  - name: jenkins-settings
+    namespace: jenkins
+    literals:
+      # The repository and branch the pipeline job builds and deploys.
+      - PIPELINE_REPO=https://github.com/meetme-venkat/account-upgrade.git
+      - PIPELINE_BRANCH=main
+      - JENKINS_URL=http://127.0.0.1:8090/

@@ -18,7 +18,13 @@ final class E2eSettings {
 
     static final String ADMIN_PASSWORD = setting("e2e.adminPassword", "UPGRADE_SECURITY_ADMIN_PASSWORD", "admin");
 
-    /** Named on every kubectl call, so the infrastructure checks never look at whatever cluster is current. */
+    /** The kube context value for tests running in a pod: kubectl then uses the pod's service account. */
+    static final String IN_CLUSTER = "in-cluster";
+
+    /**
+     * Named on every kubectl call, so the infrastructure checks never look at whatever cluster is current;
+     * {@value #IN_CLUSTER} inside the cluster.
+     */
     static final String KUBE_CONTEXT = setting("e2e.kubeContext", "ACCOUNT_UPGRADE_KUBE_CONTEXT", "rancher-desktop");
 
     static final String NAMESPACE = setting("e2e.namespace", "E2E_NAMESPACE", "account-upgrade");
@@ -31,7 +37,7 @@ final class E2eSettings {
     private E2eSettings() {
     }
 
-    private static String setting(String property, String environmentVariable, String defaultValue) {
+    static String setting(String property, String environmentVariable, String defaultValue) {
         String value = System.getProperty(property);
         if (value == null || value.isBlank()) {
             value = System.getenv(environmentVariable);

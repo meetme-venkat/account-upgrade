@@ -1,15 +1,15 @@
 # The Account Upgrade platform on Kubernetes (Rancher Desktop's k3s by default).
 #   kubectl kustomize deploy/k8s/base     render
-#   deploy/deploy.ps1 -Tag <sha>          deploy a release (the only supported way: it applies the components in order,
-#                                         sets the image tags, creates the secrets and smoke tests; see deploy/README.md)
+# Deployed by the Jenkins pipeline (Jenkinsfile, "Deploy" stage), the only supported way: it applies the components
+# in order, sets the image tags, creates the secrets and runs the end-to-end tests; see jenkins/README.md.
 #
-# Every resource carries app.kubernetes.io/component; deploy.ps1 applies them one component at a time, in order:
+# Every resource carries app.kubernetes.io/component; the pipeline applies them one component at a time, in order:
 #   platform (namespace) -> postgres, kafka (ready) -> db-schema (Job, must succeed) -> backend (rolled out)
 #   -> frontend (rolled out)
-# The images below are placeholders: deploy.ps1 replaces them with <registry>/<service>:<release> in a generated
+# The images below are placeholders: the pipeline replaces them with <registry>/<service>:<release> in a generated
 # overlay (deploy/k8s/release, git-ignored).
 # The secret account-upgrade-secrets (PostgreSQL password, JWT signing key) is not part of the manifests:
-# deploy.ps1 creates it with random values on the first deployment and keeps it afterwards.
+# the pipeline creates it with random values on the first deployment and keeps it afterwards.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
