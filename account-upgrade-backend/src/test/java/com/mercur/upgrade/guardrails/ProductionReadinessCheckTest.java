@@ -5,10 +5,9 @@ import com.mercur.upgrade.security.AuthProperties;
 import com.mercur.upgrade.web.CorsProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import javax.sql.DataSource;
 import java.time.Duration;
 import java.util.List;
 
@@ -26,7 +25,7 @@ class ProductionReadinessCheckTest {
     /** Safe settings by default; each test changes one thing. */
     private List<String> origins = List.of("https://app.example.com");
     private KafkaTopicProperties kafka = new KafkaTopicProperties(3, 2, 3);
-    private PlatformTransactionManager transactionManager = new JdbcTransactionManager(mock(DataSource.class));
+    private PlatformTransactionManager transactionManager = new JpaTransactionManager();
     private String jwtSecret = "a-production-secret-of-at-least-32-bytes";
 
     private ProductionReadinessCheck check() {
@@ -39,7 +38,7 @@ class ProductionReadinessCheckTest {
     }
 
     @Test
-    void passesWithDurableTopicsExactOriginsAndTheJdbcTransactionManager() {
+    void passesWithDurableTopicsExactOriginsAndTheJpaTransactionManager() {
         assertThatCode(check()::afterPropertiesSet).doesNotThrowAnyException();
     }
 
@@ -70,9 +69,9 @@ class ProductionReadinessCheckTest {
     }
 
     @Test
-    void refusesAnythingButTheJdbcTransactionManager() {
+    void refusesAnythingButTheJpaTransactionManager() {
         transactionManager = mock(PlatformTransactionManager.class);
-        assertThatThrownBy(check()::afterPropertiesSet).hasMessageContaining("JDBC transaction manager is required");
+        assertThatThrownBy(check()::afterPropertiesSet).hasMessageContaining("JPA transaction manager is required");
 
         transactionManager = null;
         assertThatThrownBy(check()::afterPropertiesSet).hasMessageContaining("found none");

@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -23,8 +23,9 @@ import java.util.List;
  *   <li>A wildcard CORS origin is always rejected.</li>
  *   <li>Kafka topics must survive a broker failure without losing acknowledged writes: replication factor
  *       at least 3, {@code min.insync.replicas} at least 2 and below the replication factor.</li>
- *   <li>The transaction manager must be the JDBC one. Anything else (e.g. a Kafka transaction manager
- *       replacing it) would silently run the decision and outbox writes without a shared transaction.</li>
+ *   <li>The transaction manager must be the JPA one, which also covers the native SQL. Anything else (e.g. a
+ *       Kafka transaction manager replacing it) would silently run the decision and outbox writes without a
+ *       shared transaction.</li>
  *   <li>Access tokens must not be signed with the development key from application.yml: anyone with the
  *       source could forge tokens.</li>
  *   <li>A disabled rate limit only logs a warning, since it may be enforced at a gateway instead. So do the
@@ -63,8 +64,8 @@ public class ProductionReadinessCheck implements InitializingBean {
         violations.addAll(kafkaDurabilityViolations());
 
         PlatformTransactionManager manager = transactionManager.getIfAvailable();
-        if (!(manager instanceof DataSourceTransactionManager)) {
-            violations.add("the JDBC transaction manager is required, found "
+        if (!(manager instanceof JpaTransactionManager)) {
+            violations.add("the JPA transaction manager is required, found "
                     + (manager == null ? "none" : manager.getClass().getSimpleName())
                     + ". Decision and outbox writes would not share a transaction");
         }

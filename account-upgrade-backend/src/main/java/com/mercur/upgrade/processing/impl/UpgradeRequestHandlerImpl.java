@@ -11,7 +11,6 @@ import com.mercur.upgrade.persistence.ProcessingStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
@@ -31,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>The check, the notifications (outbox rows) and the decision are written in <b>one transaction</b>:
  * the emails exist if and only if the decision is committed. A crash or a database error rolls everything
  * back and the redelivered event is processed cleanly; a concurrent duplicate (two instances, after a
- * rebalance) finds the decision taken and rolls its own work back.
+ * rebalance) finds the decision taken when storing it, and writes no emails.
  *
  * <p>{@link #handleAll} does the same for a batch of events in one transaction, with a few statements for the
  * whole batch instead of a few per event: the consumers' main path.
@@ -71,7 +70,7 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
             return;
         }
         try {
-            transactions.executeWithoutResult(status -> processOnce(event, status));
+            transactions.executeWithoutResult(status -> processOnce(event));
         } finally {
             inProgress.remove(event.eventId()); // released on failure too, so a retry can process it
         }
@@ -104,7 +103,7 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
     /**
      * Three statements for the whole batch: which events are already stored, the new decisions (one insert that
      * returns what it stored), and the emails of the decisions stored here. A decision another instance stored
-     * first is left out, and so are its emails: no rollback needed, unlike {@link #processOnce}.
+     * first is left out, and so are its emails.
      */
     private void processBatch(List<UpgradeRequestedEvent> events) {
         Set<String> alreadyStored =
@@ -141,30 +140,33 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
                 events.size() - stored.size());
     }
 
-    private void processOnce(UpgradeRequestedEvent event, TransactionStatus status) {
+    /**
+     * The decision first, then its emails, only if this transaction stored the decision: a decision another instance
+     * stored first gets no second set of emails, as in {@link #processBatch}.
+     */
+    private void processOnce(UpgradeRequestedEvent event) {
         if (repository.existsByEventId(event.eventId())) {
             log.info("Skipping duplicate event {}", event.eventId());
             return;
         }
         EligibilityResult result = eligibilityService.evaluate(event.request());
-        boolean notificationSent = notificationService.notifyDecision(event, result);
-
+        // notificationSent: recorded in the outbox by this transaction or not at all; the repository derives the
+        // delivery state from the outbox when reading.
         ProcessedUpgrade processed = new ProcessedUpgrade(
                 event.eventId(),
                 event.request().userId(),
                 event.source(),
                 result.eligible() ? ProcessingStatus.ELIGIBLE : ProcessingStatus.INELIGIBLE,
                 result.reasons(),
-                notificationSent,
+                true,
                 clock.instant());
 
-        if (repository.saveIfAbsent(processed)) {
-            log.info("Processed event {} for user {}: {} {}", event.eventId(), processed.userId(),
-                    processed.status(), processed.reasons());
-        } else {
-            // Another instance committed this decision first: discard this delivery's outbox rows.
-            status.setRollbackOnly();
+        if (!repository.saveIfAbsent(processed)) {
             log.warn("Event {} was stored concurrently by another consumer", event.eventId());
+            return;
         }
+        notificationService.notifyDecision(event, result);
+        log.info("Processed event {} for user {}: {} {}", event.eventId(), processed.userId(),
+                processed.status(), processed.reasons());
     }
 }

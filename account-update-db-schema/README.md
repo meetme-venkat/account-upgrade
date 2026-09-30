@@ -27,6 +27,7 @@ account-update-db-schema  ──exit 0──►  account-upgrade-backend  ──
 | [`001-processed-upgrades`](changelog/changes/001-processed-upgrades.sql) | `processed_upgrades`: one row per processed request (`event_id` is the idempotency key, `seq` the store order) and its indexes |
 | [`002-notification-outbox`](changelog/changes/002-notification-outbox.sql) | `notification_outbox`: the transactional email outbox and its partial indexes for pending and sent rows |
 | [`003-drop-flyway-schema-history`](changelog/changes/003-drop-flyway-schema-history.sql) | Drops `flyway_schema_history`, left over in databases the backend created with Flyway (no-op elsewhere) |
+| [`004-outbox-id-allocated-in-blocks`](changelog/changes/004-outbox-id-allocated-in-blocks.sql) | `notification_outbox.id` moves from an identity column to a column defaulting to the sequence `notification_outbox_id_seq` (increment 50), so the backend's Hibernate can reserve ids 50 at a time and batch the inserts |
 
 ## Run it
 

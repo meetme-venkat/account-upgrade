@@ -58,11 +58,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-kafka</artifactId>
         </dependency>
-        <!-- Storage for processed requests and the notification outbox. The schema is owned and migrated by the
-             separate account-update-db-schema service (Liquibase), deployed before this one. -->
+        <!-- Storage for processed requests and the notification outbox: JPA with Hibernate. The schema is owned and
+             migrated by the separate account-update-db-schema service (Liquibase), deployed before this one;
+             Hibernate only validates it (spring.jpa.hibernate.ddl-auto=validate). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

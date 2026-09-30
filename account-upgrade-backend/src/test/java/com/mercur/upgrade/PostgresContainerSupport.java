@@ -41,7 +41,8 @@ public abstract class PostgresContainerSupport {
 
     @BeforeEach
     void emptyTables() {
-        jdbc.sql("TRUNCATE processed_upgrades, notification_outbox RESTART IDENTITY").update();
+        // Sequences keep counting: Hibernate holds blocks of outbox ids in memory, which a restart would hand out again.
+        jdbc.sql("TRUNCATE processed_upgrades, notification_outbox").update();
     }
 
     protected long count(String table) {

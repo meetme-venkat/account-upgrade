@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -30,6 +31,7 @@ import static com.mercur.upgrade.TestRequests.request;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -56,17 +58,30 @@ class UpgradeRequestHandlerImplTest {
     }
 
     @Test
-    void storesEligibleOutcomeAfterNotifying() {
+    void storesEligibleOutcomeThenNotifies() {
         UpgradeRequestedEvent event = event(eligible());
         EligibilityResult result = EligibilityResult.fromFailures(List.of());
         when(eligibilityService.evaluate(event.request())).thenReturn(result);
-        when(notificationService.notifyDecision(event, result)).thenReturn(true);
         when(repository.saveIfAbsent(any())).thenReturn(true);
 
         processor.handle(event);
 
         assertThat(savedRecord()).isEqualTo(new ProcessedUpgrade(
                 event.eventId(), "u-1", RequestSource.REALTIME, ProcessingStatus.ELIGIBLE, List.of(), true, NOW));
+        InOrder order = inOrder(repository, notificationService);
+        order.verify(repository).saveIfAbsent(any());
+        order.verify(notificationService).notifyDecision(event, result);
+    }
+
+    @Test
+    void aDecisionStoredConcurrentlyByAnotherConsumerIsNotNotified() {
+        UpgradeRequestedEvent event = event(eligible());
+        when(eligibilityService.evaluate(event.request())).thenReturn(EligibilityResult.fromFailures(List.of()));
+        when(repository.saveIfAbsent(any())).thenReturn(false);
+
+        processor.handle(event);
+
+        verifyNoInteractions(notificationService);
     }
 
     @Test
@@ -86,7 +101,8 @@ class UpgradeRequestHandlerImplTest {
     }
 
     @Test
-    void recordsNotificationFailure() {
+    void aNotificationFailureDoesNotUndoTheDecision() {
+        // The delivery state is derived from the outbox when reading; the decision stands.
         UpgradeRequestedEvent event = event(eligible());
         EligibilityResult result = EligibilityResult.fromFailures(List.of());
         when(eligibilityService.evaluate(event.request())).thenReturn(result);
@@ -95,7 +111,7 @@ class UpgradeRequestHandlerImplTest {
 
         processor.handle(event);
 
-        assertThat(savedRecord().notificationSent()).isFalse();
+        assertThat(savedRecord().status()).isEqualTo(ProcessingStatus.ELIGIBLE);
     }
 
     @Test

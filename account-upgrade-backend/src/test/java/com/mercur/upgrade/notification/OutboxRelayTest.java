@@ -3,6 +3,7 @@ package com.mercur.upgrade.notification;
 import com.mercur.upgrade.IntegrationTestSupport;
 import com.mercur.upgrade.MutableClock;
 import com.mercur.upgrade.notification.impl.EmailSenderImpl;
+import com.mercur.upgrade.notification.jpa.OutboxEmailJpaRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,11 +33,14 @@ class OutboxRelayTest extends IntegrationTestSupport {
     @Autowired
     private TransactionOperations transactions;
 
+    @Autowired
+    private OutboxEmailJpaRepository outboxRows;
+
     private final MutableClock clock = new MutableClock(START);
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
     private OutboxRelay relay(EmailChannel channel, int batchSize) {
-        return new OutboxRelay(jdbc, transactions, channel, clock, meters, batchSize, MAX_ATTEMPTS, Duration.ofDays(7));
+        return new OutboxRelay(outboxRows, transactions, channel, clock, meters, batchSize, MAX_ATTEMPTS, Duration.ofDays(7));
     }
 
     private void enqueue(int count) {
