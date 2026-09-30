@@ -8,7 +8,7 @@ Three independently deployable services, deployed in this order:
 | [`account-upgrade-backend/`](account-upgrade-backend) | Event-driven upgrade service: ingestion, eligibility, notifications, persistence, query API | Java 17+, Spring Boot 4, Kafka, PostgreSQL | 8080 |
 | [`account-upgrade-frontend/`](account-upgrade-frontend) | Web UI to submit requests and browse outcomes and notifications | Angular 22, served by nginx | 4200 |
 
-They share no code and no build. The backend depends on the schema the schema service creates, the frontend only on the backend's REST API, and each folder has its own Dockerfile, tests and README.
+They share no code and no build. The backend depends on the schema the schema service creates, the frontend only on the backend's REST API, and each folder has its own Dockerfile, tests and README. [`account-upgrade-e2e/`](account-upgrade-e2e) holds the end-to-end tests (JUnit) that check a running deployment through its public API.
 
 ```
 Browser ──► frontend (nginx) ──/api──► backend ──► Kafka "upgrade-requests" ──► eligibility consumer ──► PostgreSQL
@@ -45,6 +45,7 @@ npm start                         # http://localhost:4200 (proxies /api to :8080
 ```bash
 cd account-upgrade-backend && ./mvnw test      # PostgreSQL and Kafka start as containers (needs Docker)
 cd account-upgrade-frontend && npm test
+cd account-upgrade-e2e && ./mvnw verify        # against a running deployment (default: the local Kubernetes one)
 ```
 
 ## Production guardrails

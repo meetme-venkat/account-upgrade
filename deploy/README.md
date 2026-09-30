@@ -10,7 +10,7 @@ registry to pull from, and no credentials to store.
 | [`deploy.ps1`](deploy.ps1) | The deployment step: rolls the release out to Kubernetes in order, smoke tests it, rolls back on failure |
 | [`k8s/base`](k8s/base) | The Kubernetes manifests (kustomize): namespace, PostgreSQL, Kafka, schema Job, backend, frontend |
 | [`install-pipeline.ps1`](install-pipeline.ps1) | Schedules the pipeline every few minutes as a Windows scheduled task |
-| [`validate.ps1`](validate.ps1) | Validates the running deployment end to end |
+| [`account-upgrade-e2e`](../account-upgrade-e2e) | End-to-end tests (JUnit) of the running deployment |
 
 ```
 every 2 minutes (scheduled task, as you, while you're logged on)
@@ -146,7 +146,7 @@ in a clone works the same.
 | Logs | `kubectl -n account-upgrade logs -l app.kubernetes.io/component=backend --prefix -f` |
 | Scale | `kubectl -n account-upgrade scale deployment/account-upgrade-backend --replicas 3` (until the next deployment; change `k8s/base/backend.yaml` to keep it. Keep partitions (4) >= replicas × `UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY`) |
 | Connect to PostgreSQL from the host | `kubectl -n account-upgrade port-forward svc/postgres 5433:5432`, then `127.0.0.1:5433`, user `postgres`, the password from the secret |
-| Validate the running deployment end to end | `validate.ps1`: 45 checks (workloads ready, schema Job, Kafka topics and lag, login and tokens, eligibility rules, validation errors, idempotency, notifications, security headers, rate limit). Exits 1 if any fails. `-SkipInfrastructure` for a deployment running elsewhere, `-SkipRateLimit` to avoid the request burst |
+| Validate the running deployment end to end | `cd account-upgrade-e2e; .\mvnw.cmd verify`: 45 JUnit checks (workloads ready, schema Job, Kafka topics and lag, login and tokens, eligibility rules, validation errors, idempotency, notifications, security headers, rate limit). `-DexcludedGroups=infrastructure` for a deployment without kubectl access, `-DexcludedGroups=rate-limit` to avoid the request burst. See [its README](../account-upgrade-e2e/README.md) |
 | Remove the deployment | `kubectl delete namespace account-upgrade` (deletes the data volumes too) |
 
 Run the scripts with `powershell -NoProfile -ExecutionPolicy Bypass -File <script> [options]`.
