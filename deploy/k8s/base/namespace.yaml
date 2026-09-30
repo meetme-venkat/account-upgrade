@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: account-upgrade
+  labels:
+    app.kubernetes.io/component: platform
+    # Rejects privileged pods, host namespaces, hostPath volumes and the like.
+    pod-security.kubernetes.io/enforce: baseline

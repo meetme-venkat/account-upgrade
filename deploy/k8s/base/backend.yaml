@@ -1,0 +1,142 @@
+# account-upgrade-backend: 2 replicas, rolled out one pod at a time (a new pod must be ready before an old one
+# stops), so a deployment causes no downtime. Published on the host at port 8080 (Service type LoadBalancer).
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-upgrade-backend
+  labels:
+    app.kubernetes.io/name: account-upgrade-backend
+    app.kubernetes.io/component: backend
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: account-upgrade-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-upgrade-backend
+  labels:
+    app.kubernetes.io/name: account-upgrade-backend
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  # A rollout that makes no progress for this long fails (and deploy.ps1 rolls back).
+  progressDeadlineSeconds: 240
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: account-upgrade-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: account-upgrade-backend
+        app.kubernetes.io/component: backend
+    spec:
+      enableServiceLinks: false
+      # preStop (10 s) + graceful shutdown (30 s per phase) fit in it.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: account-upgrade-backend
+      containers:
+        - name: backend
+          image: account-upgrade-backend
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/account_upgrade
+            - name: SPRING_DATASOURCE_USERNAME
+              value: postgres
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: account-upgrade-secrets
+                  key: postgres-password
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: kafka-0.kafka:9092,kafka-1.kafka:9092,kafka-2.kafka:9092
+            - name: UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR
+              value: "3"
+            - name: UPGRADE_MESSAGING_KAFKA_MIN_INSYNC_REPLICAS
+              value: "2"
+            # Partitions (4) >= replicas (2) x consumer concurrency, or some consumers sit idle.
+            - name: UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY
+              value: "2"
+            - name: UPGRADE_SECURITY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: account-upgrade-secrets
+                  key: jwt-secret
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          lifecycle:
+            # Keeps serving while the Service stops routing to this pod, then shuts down gracefully.
+            preStop:
+              sleep:
+                seconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: account-upgrade-backend
+  labels:
+    app.kubernetes.io/name: account-upgrade-backend
+    app.kubernetes.io/component: backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: account-upgrade-backend

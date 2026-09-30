@@ -1,0 +1,29 @@
+# Guardrail: the Kubernetes manifests cannot merge unless they render (kustomize) and every resource is valid
+# against the Kubernetes API schemas (kubeconform, strict: unknown or misspelled fields fail). See deploy/README.md.
+name: k8s-manifests
+
+on:
+  pull_request:
+    paths: ['deploy/k8s/**', '.github/workflows/k8s-manifests.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k8s-manifests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Render
+        run: kubectl kustomize deploy/k8s/base > rendered.yaml
+
+      - name: Validate against the Kubernetes schemas
+        run: |
+          docker run --rm -v "$PWD/rendered.yaml:/rendered.yaml:ro" ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary -output text /rendered.yaml

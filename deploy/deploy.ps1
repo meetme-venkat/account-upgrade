@@ -1,19 +1,21 @@
 <#
 .SYNOPSIS
-    Deploys one release of the Account Upgrade platform to the local Docker engine (Rancher Desktop, dockerd/moby).
+    Deploys one release of the Account Upgrade platform to Kubernetes (Rancher Desktop's k3s by default).
 
 .DESCRIPTION
-    1. Pulls the database schema, backend and frontend images tagged with the release (commit SHA).
-    2. Rolls the compose stack forward in order and waits for every health check (docker compose up --wait):
-       the schema job (Liquibase) must complete successfully before the backend starts, and the backend must be
-       healthy before the frontend starts. A failed schema job fails the release before any service is replaced.
+    1. Renders the manifests in deploy/k8s/base with the release's images (<registry>/<service>:<tag>) and creates the
+       secret account-upgrade-secrets on the first deployment (random PostgreSQL password and JWT signing key).
+    2. Rolls the release out one component at a time, waiting for each:
+         PostgreSQL and Kafka ready -> schema Job (Liquibase) succeeded -> backend rolled out -> frontend rolled out.
+       A failed schema Job fails the release before the backend is touched. Backend and frontend run 2 replicas
+       each and are replaced one pod at a time (a new pod must be ready first), so a deployment has no downtime.
     3. Smoke tests the running release: the API refuses a request without a token; logging in works; a real request
        goes through the API, Kafka, PostgreSQL and the email outbox; the UI and its /api proxy work with the token.
     4. If any step fails, rolls back to the images that were running before, and exits non-zero.
 
     pipeline.ps1 runs it. It can also be run by hand, for example to roll back:
         powershell -NoProfile -ExecutionPolicy Bypass -File deploy\deploy.ps1 -Tag <commit sha>
-    Locally built images, without a registry:
+    Locally built images, without a registry (Rancher Desktop's Kubernetes sees the images of its Docker engine):
         docker build -t local/account-update-db-schema:dev account-update-db-schema
         docker build -t local/account-upgrade-backend:dev account-upgrade-backend
         docker build -t local/account-upgrade-frontend:dev account-upgrade-frontend
@@ -29,9 +31,13 @@ param(
 
     [string]$Registry = 'ghcr.io/meetme-venkat',
 
-    # Fixed, so every deployment updates the same stack whatever folder the runner checked out into.
-    [string]$ProjectName = 'account-upgrade',
+    # Named explicitly on every kubectl call, so a deployment never lands in whatever cluster is current.
+    [string]$Context = $(if ($env:ACCOUNT_UPGRADE_KUBE_CONTEXT) { $env:ACCOUNT_UPGRADE_KUBE_CONTEXT } else { 'rancher-desktop' }),
 
+    # Must match the namespace in deploy/k8s/base/kustomization.yaml.
+    [string]$Namespace = 'account-upgrade',
+
+    # Don't pre-pull the images with docker (the cluster pulls what it doesn't have).
     [switch]$SkipPull,
 
     [int]$WaitTimeoutSec = 300,
@@ -50,8 +56,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$composeFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'docker-compose.yml'
-$compose = @('compose', '-p', $ProjectName, '-f', $composeFile)
+$manifests = Join-Path $PSScriptRoot 'k8s'
+$overlay = Join-Path $manifests 'release'
+$kubectl = @('--context', $Context, '--namespace', $Namespace)
+$services = 'account-update-db-schema', 'account-upgrade-backend', 'account-upgrade-frontend'
 $schemaImage = "$Registry/account-update-db-schema:$Tag"
 $backendImage = "$Registry/account-upgrade-backend:$Tag"
 $frontendImage = "$Registry/account-upgrade-frontend:$Tag"
@@ -63,15 +71,34 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-# Native commands never throw in PowerShell 5.1, and with 'Stop' their stderr (docker's progress output) would.
+# Native commands never throw in PowerShell 5.1, and with 'Stop' their stderr (progress output) would.
 # So: run with 'Continue' and fail on the exit code instead.
+function Invoke-Kubectl {
+    $ErrorActionPreference = 'Continue'
+    & kubectl @kubectl @args 2>&1 | ForEach-Object { "$_" } | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "kubectl $($args -join ' ') failed with exit code $LASTEXITCODE" }
+}
+
+# Stdout of a kubectl command, or $null if it fails.
+function Get-KubectlOutput {
+    $ErrorActionPreference = 'Continue'
+    $out = & kubectl @kubectl @args 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $out
+}
+
+function Test-Docker {
+    $ErrorActionPreference = 'Continue'
+    & docker version --format '{{.Server.Version}}' 2>$null | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
 function Invoke-Docker {
     $ErrorActionPreference = 'Continue'
     & docker @args | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "docker $($args -join ' ') failed with exit code $LASTEXITCODE" }
 }
 
-# Stdout of a docker command, or $null if it fails.
 function Get-DockerOutput {
     $ErrorActionPreference = 'Continue'
     $out = & docker @args 2>$null
@@ -79,33 +106,103 @@ function Get-DockerOutput {
     return $out
 }
 
-# The image of the service's current container, running or not (the schema job exits once it is done).
-function Get-RunningImage([string]$Service) {
-    $id = Get-DockerOutput @compose ps -a -q $Service | Select-Object -First 1
-    if (-not $id) { return $null }
-    return Get-DockerOutput inspect --format '{{.Config.Image}}' $id
+# The image a workload currently runs, or $null (not deployed yet).
+function Get-RunningImage([string]$Kind, [string]$Name) {
+    $image = Get-KubectlOutput get $Kind $Name -o 'jsonpath={.spec.template.spec.containers[0].image}'
+    if ($image) { return "$image".Trim() }
+    return $null
 }
 
-# Another compose project (for example a stack started by hand from a clone) holding the ports would make the
-# rollout fail halfway; stop before touching anything instead.
-function Assert-PortsFree {
+# The docker compose stack this platform used to run as (or one started by hand from a clone) publishes the same
+# ports; the Kubernetes services could not bind them. Stop before touching anything instead.
+function Assert-NoComposeStack {
+    if (-not (Test-Docker)) { return }
     foreach ($port in 8080, 4200) {
         # No quoted template (PowerShell 5.1 mangles embedded quotes in native arguments): match the label list.
-        $owners = @(Get-DockerOutput ps --filter "publish=$port" --format '{{.Names}}|{{.Labels}}') |
-            Where-Object { $_ -and $_ -notmatch "(^|[|,])com\.docker\.compose\.project=$([regex]::Escape($ProjectName))(,|$)" } |
-            ForEach-Object { $_.Split('|')[0] }
+        $owners = @(Get-DockerOutput ps --filter "publish=$port" --filter 'label=com.docker.compose.project' --format '{{.Names}}|{{.Labels}}') |
+            Where-Object { $_ } |
+            ForEach-Object {
+                $project = if ($_ -match '(^|[|,])com\.docker\.compose\.project=([^,]+)') { $Matches[2] } else { '?' }
+                "$($_.Split('|')[0]) (compose project '$project')"
+            }
         if ($owners) {
-            throw "Port $port is used by container(s) outside project '$ProjectName': $($owners -join ', '). " +
-                  "Stop them first, e.g. 'docker compose -p <project> down'."
+            throw "Port $port is published by docker compose: $($owners -join ', '). " +
+                  "Stop that stack first, e.g. 'docker compose -p <project> down' (its data volume is kept)."
         }
     }
 }
 
+# Created once with random values, then kept: PostgreSQL only reads its password when it initialises the volume,
+# and a new JWT key would sign everyone out.
+function Initialize-Secrets {
+    if (Get-KubectlOutput get secret account-upgrade-secrets -o name) { return }
+    Write-Step 'Creating secret account-upgrade-secrets (random PostgreSQL password and JWT signing key)'
+    $bytes = New-Object byte[] 48
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes)
+    $jwt = [Convert]::ToBase64String($bytes)
+    $rng.GetBytes($bytes)
+    # Hex: safe in a JDBC connection and in psql without quoting.
+    $postgres = -join ($bytes[0..23] | ForEach-Object { $_.ToString('x2') })
+    $rng.Dispose()
+    Invoke-Kubectl create secret generic account-upgrade-secrets `
+        --from-literal=postgres-password=$postgres --from-literal=jwt-secret=$jwt
+    Invoke-Kubectl label secret account-upgrade-secrets app.kubernetes.io/part-of=account-upgrade `
+        app.kubernetes.io/component=platform
+}
+
+# A kustomize overlay of deploy/k8s/base that pins the release's images (the base only has placeholders).
+function Write-Overlay([string]$Schema, [string]$Backend, [string]$Frontend) {
+    New-Item -ItemType Directory -Force -Path $overlay | Out-Null
+    $images = @{ 'account-update-db-schema' = $Schema; 'account-upgrade-backend' = $Backend; 'account-upgrade-frontend' = $Frontend }
+    $lines = @('# Generated by deploy/deploy.ps1 for one release. Not committed.',
+        'apiVersion: kustomize.config.k8s.io/v1beta1', 'kind: Kustomization', 'resources:', '  - ../base', 'images:')
+    foreach ($name in $services) {
+        $image = $images[$name]
+        $split = $image.LastIndexOf(':')
+        $lines += "  - name: $name", "    newName: $($image.Substring(0, $split))", "    newTag: '$($image.Substring($split + 1))'"
+    }
+    # No BOM: kustomize reads it as part of the first key.
+    [System.IO.File]::WriteAllLines((Join-Path $overlay 'kustomization.yaml'), [string[]]$lines)
+}
+
+function Invoke-ApplyComponent([string]$Component) {
+    Invoke-Kubectl apply -k $overlay --selector "app.kubernetes.io/component=$Component"
+}
+
+# Succeeded, failed, or still running past the deadline (the Job's own backoff retries count as running).
+function Wait-SchemaJob {
+    $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
+    while ($true) {
+        # No quoted filter in the template: PowerShell 5.1 mangles embedded quotes in native arguments.
+        $conditions = "$(Get-KubectlOutput get job account-update-db-schema -o 'jsonpath={range .status.conditions[*]}{.type}={.status};{end}')"
+        if ($conditions -match '(^|;)Complete=True;') { return }
+        if ($conditions -match '(^|;)Failed=True;') { throw 'The schema job failed (see its logs below)' }
+        if ((Get-Date) -gt $deadline) { throw "The schema job did not complete within $WaitTimeoutSec s" }
+        Start-Sleep -Seconds 2
+    }
+}
+
 function Start-Release([string]$Schema, [string]$Backend, [string]$Frontend) {
-    $env:DB_SCHEMA_IMAGE = $Schema
-    $env:BACKEND_IMAGE = $Backend
-    $env:FRONTEND_IMAGE = $Frontend
-    Invoke-Docker @compose up -d --no-build --remove-orphans --wait --wait-timeout $WaitTimeoutSec
+    Write-Overlay $Schema $Backend $Frontend
+    Invoke-ApplyComponent 'platform'
+    Initialize-Secrets
+    foreach ($component in 'postgres', 'kafka') { Invoke-ApplyComponent $component }
+    Invoke-Kubectl rollout status statefulset/postgres --timeout "${WaitTimeoutSec}s"
+    Invoke-Kubectl rollout status statefulset/kafka --timeout "${WaitTimeoutSec}s"
+
+    Write-Host "Schema job: $Schema"
+    Invoke-Kubectl delete job account-update-db-schema --ignore-not-found --wait=true
+    Invoke-ApplyComponent 'db-schema'
+    Wait-SchemaJob
+
+    Write-Host "Backend: $Backend"
+    Invoke-ApplyComponent 'backend'
+    Invoke-Kubectl rollout status deployment/account-upgrade-backend --timeout "${WaitTimeoutSec}s"
+
+    Write-Host "Frontend: $Frontend"
+    Invoke-ApplyComponent 'frontend'
+    Invoke-Kubectl rollout status deployment/account-upgrade-frontend --timeout "${WaitTimeoutSec}s"
 }
 
 # Invoke-RestMethod in 5.1 returns a JSON array as one object; unroll it. PowerShell unwraps a one-item array on
@@ -124,10 +221,21 @@ function Get-StatusCode([string]$Url) {
 }
 
 function Test-Release {
-    $health = Invoke-RestMethod -Uri "$apiUrl/actuator/health/readiness" -TimeoutSec 10
+    # Rancher Desktop publishes a LoadBalancer port on the host a few seconds after the Service is created; until
+    # then connections are refused or closed.
+    $deadline = (Get-Date).AddSeconds(60)
+    while ($true) {
+        try {
+            $health = Invoke-RestMethod -Uri "$apiUrl/actuator/health/readiness" -TimeoutSec 10
+            $ui = Invoke-WebRequest -Uri "$uiUrl/healthz" -UseBasicParsing -TimeoutSec 10
+            break
+        }
+        catch [System.Net.WebException] {
+            if ((Get-Date) -gt $deadline) { throw "Not reachable on the host: $($_.Exception.Message)" }
+        }
+        Start-Sleep -Seconds 2
+    }
     if ($health.status -ne 'UP') { throw "Backend readiness is '$($health.status)'" }
-
-    $ui = Invoke-WebRequest -Uri "$uiUrl/healthz" -UseBasicParsing -TimeoutSec 10
     if ($ui.StatusCode -ne 200) { throw "Frontend /healthz returned $($ui.StatusCode)" }
 
     # The API is protected: no token, no data. Then log in as the UI does.
@@ -160,8 +268,20 @@ function Test-Release {
     Write-Host "Smoke test passed ($userId)"
 }
 
+function Write-RecentLogs {
+    $ErrorActionPreference = 'Continue'
+    & kubectl @kubectl get pods -o wide 2>&1 | Out-Host
+    foreach ($component in 'db-schema', 'backend', 'frontend') {
+        & kubectl @kubectl logs --selector "app.kubernetes.io/component=$component" --all-containers --prefix `
+            --tail 100 --max-log-requests 10 2>&1 | Out-Host
+    }
+    $ErrorActionPreference = 'Stop'
+}
+
+# Only with the Docker engine (Rancher Desktop's moby), whose images the cluster runs.
 function Remove-OldImages([string[]]$Keep) {
-    foreach ($repo in "$Registry/account-update-db-schema", "$Registry/account-upgrade-backend", "$Registry/account-upgrade-frontend") {
+    if (-not (Test-Docker)) { return }
+    foreach ($repo in $services | ForEach-Object { "$Registry/$_" }) {
         # Newest first.
         @(Get-DockerOutput images $repo --format '{{.Repository}}:{{.Tag}}') |
             Where-Object { $_ -and $_ -notmatch ':<none>$' -and $Keep -notcontains $_ } |
@@ -187,21 +307,26 @@ function Write-Record([string]$Result, [string]$Detail) {
     }
 }
 
-Write-Step "Deploying release $Tag to project '$ProjectName'"
-Invoke-Docker version --format 'Docker engine {{.Server.Version}}'
+Write-Step "Deploying release $Tag to namespace '$Namespace' (context '$Context')"
+$ErrorActionPreference = 'Continue'
+$server = & kubectl --context $Context version -o json 2>$null | Out-String
+$ErrorActionPreference = 'Stop'
+if ($LASTEXITCODE -ne 0) {
+    throw "Kubernetes context '$Context' is not reachable. Enable Kubernetes in Rancher Desktop (Preferences -> Kubernetes), or pass -Context."
+}
+Write-Host "Kubernetes $(($server | ConvertFrom-Json).serverVersion.gitVersion)"
 
 # Schema changes only go forward: rolling back re-runs the previous schema image, which finds nothing to do.
-# A stack deployed before the schema service existed has no previous schema image; the new one is used then.
-$previousSchema = Get-RunningImage 'account-update-db-schema'
+$previousSchema = Get-RunningImage 'job' 'account-update-db-schema'
 if (-not $previousSchema) { $previousSchema = $schemaImage }
-$previousBackend = Get-RunningImage 'account-upgrade-backend'
-$previousFrontend = Get-RunningImage 'account-upgrade-frontend'
+$previousBackend = Get-RunningImage 'deployment' 'account-upgrade-backend'
+$previousFrontend = Get-RunningImage 'deployment' 'account-upgrade-frontend'
 if ($previousBackend) { Write-Host "Currently running: $previousBackend, $previousFrontend" }
 else { Write-Host 'No release running yet (first deployment)' }
 
-Assert-PortsFree
+Assert-NoComposeStack
 
-if (-not $SkipPull) {
+if (-not $SkipPull -and (Test-Docker)) {
     Write-Step 'Pulling images'
     Invoke-Docker pull $schemaImage
     Invoke-Docker pull $backendImage
@@ -209,7 +334,7 @@ if (-not $SkipPull) {
 }
 
 try {
-    Write-Step 'Rolling out and waiting for health checks'
+    Write-Step 'Rolling out, in order, and waiting for each component'
     Start-Release $schemaImage $backendImage $frontendImage
     Write-Step 'Smoke testing'
     Test-Release
@@ -217,10 +342,8 @@ try {
 catch {
     $failure = $_.Exception.Message
     Write-Host "::error::Release $Tag failed: $failure"
-    Write-Step 'Recent logs'
-    $ErrorActionPreference = 'Continue'
-    & docker @compose logs --tail 100 account-update-db-schema account-upgrade-backend account-upgrade-frontend | Out-Host
-    $ErrorActionPreference = 'Stop'
+    Write-Step 'Pods and recent logs'
+    Write-RecentLogs
 
     $canRollBack = $previousBackend -and $previousFrontend -and
         ($previousBackend -ne $backendImage -or $previousFrontend -ne $frontendImage)
