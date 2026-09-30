@@ -38,8 +38,11 @@ spring:
         request.timeout.ms: 4000
         delivery.timeout.ms: 9000
     listener:
-      # Commit each record's offset right after it is processed: a crash redelivers at most one record.
-      ack-mode: record
+      # Commit the offsets once per poll, after its records are processed. A crash redelivers at most that poll's
+      # records, which are skipped by event id (UpgradeRequestHandlerImpl). Per-record commits cost a broker round trip
+      # per event: at 100,000 requests they took one broker to 1.5 cores and processing ran ~30 % slower
+      # (deploy/load-test/peak-100k.md).
+      ack-mode: batch
     consumer:
       group-id: upgrade-eligibility
       auto-offset-reset: earliest

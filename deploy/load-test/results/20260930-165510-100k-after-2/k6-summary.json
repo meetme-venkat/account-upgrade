@@ -1,0 +1,1 @@
+{"runId":"peak-1790767510","requests":100000,"vus":200,"testSeconds":14.473663142,"httpRequests":100001,"requestsPerSecond":6909.170057289427,"accepted":100000,"notAccepted":0,"failedRate":0,"latencyMs":{"p(90)":48.102024,"p(95)":56.521648,"p(99)":77.132939,"max":176.825951,"avg":28.363146529034577,"min":3.051401,"med":25.2984}}
