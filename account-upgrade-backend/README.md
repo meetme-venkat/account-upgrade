@@ -33,7 +33,7 @@ Each package has a single responsibility and could be split into its own microse
 |---|---|
 | `ingestion` | REST ingestion API; turns requests into `UpgradeRequestedEvent`s and publishes them |
 | `messaging` | Topic ports (`EventPublisher`, `UpgradeRequestHandler`) and the Kafka adapter: publisher, listener, topics, retry and dead-letter policy |
-| `processing` | Consumer that orchestrates eligibility → notification → persistence in one transaction |
+| `processing` | Consumer that orchestrates eligibility → persistence → notification, one transaction per batch of events |
 | `eligibility` | Pluggable rules engine; thresholds configurable in `application.yml` |
 | `notification` | Builds the user and parent emails. The transactional outbox (`EmailSenderImpl`), the `OutboxRelay` that delivers them, and the `EmailChannel` port (log-only today) |
 | `persistence` | `ProcessedUpgradeRepository` port and its PostgreSQL adapter. The tables are created and migrated by the separate [`account-update-db-schema`](../account-update-db-schema) service (Liquibase), which is deployed first; this service never changes the schema |
@@ -55,13 +55,19 @@ Each package has a single responsibility and could be split into its own microse
   - a real-time request gets `503`, meaning "not written";
   - a batch item gets a `REJECTED` receipt, and the rest of the batch continues.
 - **Retries and dead letters:** a failed record is retried with exponential backoff (1 s up to 30 s, about 3.5 minutes in total, so events survive a short database outage). After that it goes to the dead-letter queue, `upgrade-requests-dlq`. Unreadable payloads go there immediately.
-- **Idempotency and exactly-once effects:** delivery is at-least-once. For each event, the processor writes the duplicate check, the decision and the email rows in **one PostgreSQL transaction**:
-  - a crash or database error rolls everything back, so the redelivered event is processed cleanly;
-  - a concurrent duplicate on another instance (after a rebalance) finds the decision already taken (`ON CONFLICT DO NOTHING`) and discards its own email rows;
-  - on one instance, an in-process claim also stops two threads from processing the same event.
+- **Batches:** a consumer processes a poll's records (up to `spring.kafka.consumer.max-poll-records`, 500) in **one PostgreSQL transaction**, with three statements:
+  1. which events are already stored;
+  2. the new decisions, in one multi-row insert;
+  3. the emails of the decisions this transaction stored, in one multi-row insert.
+
+  If the batch fails, it rolls back, and its events are processed again one at a time. The first event that still fails is retried, and dead-lettered, on its own; the events before it are committed. Offsets are committed once per batch.
+- **Idempotency and exactly-once effects:** delivery is at-least-once. The duplicate check, the decision and the email rows are written in one PostgreSQL transaction (per batch, or per event when processed one at a time):
+  - a crash or database error rolls everything back, so redelivered events are processed cleanly;
+  - a concurrent duplicate on another instance (after a rebalance) finds the decision already taken (`ON CONFLICT DO NOTHING`) and writes no emails for it;
+  - on one instance, an in-process claim also stops two threads from processing the same event, and an event delivered twice in one batch is processed once.
 - **Client retries:** send an `Idempotency-Key` header (1–128 characters of `A-Z a-z 0-9 . _ : -`). The event ID is then derived from the key (for a batch, from the key plus the item's index), so a retried request produces the same event IDs and is processed and notified once. Without a key, every call creates new events.
 - **Email delivery:** `OutboxRelay` runs on every instance and claims rows with `FOR UPDATE SKIP LOCKED`, so no row is taken twice. It retries failures with backoff (1 s up to 5 min, 8 attempts). `notificationSent` turns `true` once every email for the decision has been delivered, usually within a second. Delivery is at-least-once: a crash between sending and marking a row sent means one resend, which the channel can drop using the `eventId:role` key.
-- **Graceful shutdown:** in-flight HTTP requests (and their publishes) finish, and the Kafka consumers stop after finishing their current record. Anything accepted is already durable in Kafka, so nothing needs draining.
+- **Graceful shutdown:** in-flight HTTP requests (and their publishes) finish, and the Kafka consumers stop after finishing their current batch. Anything accepted is already durable in Kafka, so nothing needs draining.
 
 ### Resource bounds
 
