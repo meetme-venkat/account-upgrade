@@ -133,22 +133,17 @@ index=main source=account-upgrade app=kafka "ERROR"                             
 a day and has **no login**, so keep port 8000 on 127.0.0.1.
 
 **Changing the admin password.** Splunk keeps its password in its own configuration on the volume. The secret is
-used for the first setup, and afterwards by the image's startup script to log in, so the two must match:
+used for the first setup, and afterwards by the image's startup script to log in, so the two must match. Change
+both at once with:
 
-1. **In Splunk:** change it under Settings → Users → admin.
-2. **In the secret:** set the same password, keeping the HEC token:
+```sh
+deploy/k8s/monitoring/splunk-password.sh      # asks twice, without echoing; bash or Git Bash, in your own terminal
+```
 
-   ```sh
-   read -s -p "New Splunk password: " PW; echo
-   # Refuses an empty value (e.g. when the prompt was skipped), which would break Splunk's next start.
-   [ -n "$PW" ] && kubectl -n monitoring patch secret splunk --type merge \
-       -p "{\"stringData\":{\"admin-password\":\"$PW\"}}" || echo "Empty password: secret not changed"
-   unset PW
-   ```
-
-   Avoid `"` and `\` in the password: they would break this JSON.
-
-If the secret changes but Splunk doesn't, Splunk fails to start on its next restart.
+- **Rules:** at least 8 characters, and no `"` or `\`.
+- **If Splunk refuses the new password:** the secret is left unchanged too.
+- **Don't change only one of them:** a password changed only in the UI, or only in the secret, makes Splunk fail on
+  its next restart.
 
 **Running as non-root.** The image normally uses sudo to switch users. Here it runs directly as the `splunk` user
 (`restricted` Pod Security):
