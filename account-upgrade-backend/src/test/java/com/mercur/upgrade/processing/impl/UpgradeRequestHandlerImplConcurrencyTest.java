@@ -7,6 +7,7 @@ import com.mercur.upgrade.eligibility.EligibilityService;
 import com.mercur.upgrade.notification.NotificationService;
 import com.mercur.upgrade.notification.impl.EmailSenderImpl;
 import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionOperations;
@@ -42,7 +43,7 @@ class UpgradeRequestHandlerImplConcurrencyTest extends IntegrationTestSupport {
 
     private UpgradeRequestHandlerImpl processor(EligibilityService eligibility) {
         return new UpgradeRequestHandlerImpl(eligibility, new NotificationService(outbox, clock), repository, clock,
-                transactions);
+                transactions, new SimpleMeterRegistry());
     }
 
     @Test

@@ -12,6 +12,7 @@ import com.mercur.upgrade.persistence.ProcessedUpgrade;
 import com.mercur.upgrade.persistence.ProcessedUpgradeRepository;
 import com.mercur.upgrade.persistence.ProcessingStatus;
 import com.mercur.upgrade.processing.impl.UpgradeRequestHandlerImpl;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -58,7 +59,7 @@ class TransactionalProcessingTest extends IntegrationTestSupport {
     /** A separate processor instance (its own in-memory claim), as on another server. */
     private UpgradeRequestHandlerImpl instance(EmailSender sender, ProcessedUpgradeRepository repo) {
         return new UpgradeRequestHandlerImpl(eligibilityService, new NotificationService(sender, clock), repo, clock,
-                transactions);
+                transactions, new SimpleMeterRegistry());
     }
 
     @Test

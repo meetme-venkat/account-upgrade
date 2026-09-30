@@ -1,0 +1,207 @@
+{
+  "uid": "account-upgrade",
+  "title": "Account Upgrade",
+  "description": "Ingestion, processing, notifications, database and JVM of the account upgrade platform.",
+  "tags": ["account-upgrade"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    { "type": "row", "title": "Now", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+    {
+      "type": "stat", "title": "Requests accepted /s", "description": "Upgrade requests published to Kafka, all instances.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "sum(rate(kafka_topic_partition_current_offset{topic=\"upgrade-requests\"}[1m]))" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat", "title": "Decisions /s",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "sum(rate(upgrade_decisions_total[1m]))" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "decimals": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat", "title": "Kafka backlog", "description": "Requests accepted but not yet processed (consumer lag).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "sum(kafka_consumergroup_lag{consumergroup=\"upgrade-eligibility\",topic=\"upgrade-requests\"})" }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 10000 }, { "color": "red", "value": 100000 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat", "title": "Emails waiting", "description": "Outbox rows not yet delivered (including those waiting for a retry).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "max(upgrade_notifications_pending)" }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 10000 }, { "color": "red", "value": 100000 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat", "title": "Emails failed", "description": "Emails that used up every delivery attempt.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "max(upgrade_notifications_failed)" }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "stat", "title": "Dead letters (1 h)", "description": "Events moved to the dead-letter topic after their retries.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "targets": [{ "refId": "A", "expr": "sum(increase(upgrade_dead_letters_total[1h])) or vector(0)" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" }
+    },
+
+    { "type": "row", "title": "Ingestion (HTTP)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "API calls /s by endpoint and status",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [{ "refId": "A", "expr": "sum by (method, uri, status) (rate(http_server_requests_seconds_count{uri=~\"/api/.*\"}[1m]))", "legendFormat": "{{method}} {{uri}} {{status}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries", "title": "Ingestion latency (p50 / p95 / p99)", "description": "POST /api/batch-upgrade and /api/realtime-upgrade, all instances.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_requests_seconds_bucket{uri=~\"/api/(batch|realtime)-upgrade\"}[1m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{uri=~\"/api/(batch|realtime)-upgrade\"}[1m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{uri=~\"/api/(batch|realtime)-upgrade\"}[1m])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+
+    { "type": "row", "title": "Processing (Kafka consumers)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Accepted vs decided /s", "description": "When decisions keep up with accepted requests, the backlog stays flat.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(kafka_topic_partition_current_offset{topic=\"upgrade-requests\"}[1m]))", "legendFormat": "accepted" },
+        { "refId": "B", "expr": "sum by (status) (rate(upgrade_decisions_total[1m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries", "title": "Kafka backlog by partition",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
+      "targets": [{ "refId": "A", "expr": "sum by (partition) (kafka_consumergroup_lag{consumergroup=\"upgrade-eligibility\",topic=\"upgrade-requests\"})", "legendFormat": "partition {{partition}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries", "title": "Decisions /s by instance",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+      "targets": [{ "refId": "A", "expr": "sum by (instance) (rate(upgrade_decisions_total[1m]))", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+
+    { "type": "row", "title": "Notifications (outbox relay)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Emails sent /s by instance",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [{ "refId": "A", "expr": "sum by (instance) (rate(upgrade_notifications_sent_total[1m]))", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries", "title": "Emails waiting and failed",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "refId": "A", "expr": "max(upgrade_notifications_pending)", "legendFormat": "waiting" },
+        { "refId": "B", "expr": "max(upgrade_notifications_failed)", "legendFormat": "failed" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+
+    { "type": "row", "title": "Database", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Connection pool by instance", "description": "Pending > 0 means threads are waiting for a connection.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 33 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (instance) (hikaricp_connections_active)", "legendFormat": "active {{instance}}" },
+        { "refId": "B", "expr": "sum by (instance) (hikaricp_connections_pending)", "legendFormat": "pending {{instance}}" },
+        { "refId": "C", "expr": "max(hikaricp_connections_max)", "legendFormat": "pool size" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries", "title": "PostgreSQL transactions /s",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 33 },
+      "targets": [
+        { "refId": "A", "expr": "rate(pg_stat_database_xact_commit{datname=\"account_upgrade\"}[1m])", "legendFormat": "commits" },
+        { "refId": "B", "expr": "rate(pg_stat_database_xact_rollback{datname=\"account_upgrade\"}[1m])", "legendFormat": "rollbacks" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries", "title": "PostgreSQL connections and rows written /s",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 33 },
+      "targets": [
+        { "refId": "A", "expr": "pg_stat_database_numbackends{datname=\"account_upgrade\"}", "legendFormat": "connections" },
+        { "refId": "B", "expr": "rate(pg_stat_database_tup_inserted{datname=\"account_upgrade\"}[1m])", "legendFormat": "rows inserted /s" },
+        { "refId": "C", "expr": "rate(pg_stat_database_tup_updated{datname=\"account_upgrade\"}[1m])", "legendFormat": "rows updated /s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+
+    { "type": "row", "title": "Backend JVM", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "CPU by instance", "description": "Share of the CPU available to the process.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 42 },
+      "targets": [{ "refId": "A", "expr": "process_cpu_usage{job=\"backend\"}", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries", "title": "Heap used by instance",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 42 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (instance) (jvm_memory_used_bytes{job=\"backend\",area=\"heap\"})", "legendFormat": "used {{instance}}" },
+        { "refId": "B", "expr": "max(sum by (instance) (jvm_memory_max_bytes{job=\"backend\",area=\"heap\"}))", "legendFormat": "max" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries", "title": "Threads and GC pause time by instance",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 42 },
+      "targets": [
+        { "refId": "A", "expr": "jvm_threads_live_threads{job=\"backend\"}", "legendFormat": "threads {{instance}}" },
+        { "refId": "B", "expr": "sum by (instance) (rate(jvm_gc_pause_seconds_sum{job=\"backend\"}[1m])) * 1000", "legendFormat": "GC ms/s {{instance}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ]
+}

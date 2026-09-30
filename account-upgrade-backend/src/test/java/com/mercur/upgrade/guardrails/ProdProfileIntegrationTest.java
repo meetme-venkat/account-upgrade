@@ -13,10 +13,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -113,5 +115,14 @@ class ProdProfileIntegrationTest extends PostgresContainerSupport {
                 .andExpect(jsonPath("$.components").doesNotExist());
         mockMvc.perform(get("/actuator/health/liveness")).andExpect(status().isOk());
         mockMvc.perform(get("/actuator/env")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void servesMetricsInPrometheusFormat() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("upgrade_decisions_total{status=\"ELIGIBLE\"}")))
+                .andExpect(content().string(containsString("upgrade_notifications_pending")))
+                .andExpect(content().string(containsString("hikaricp_connections_active")));
     }
 }

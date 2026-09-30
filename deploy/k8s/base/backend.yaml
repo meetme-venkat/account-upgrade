@@ -16,6 +16,24 @@ spec:
       port: 8080
       targetPort: http
 ---
+# Headless: its DNS name resolves to every ready backend pod, so Prometheus (deploy/k8s/monitoring) scrapes each
+# instance's /actuator/prometheus without needing Kubernetes API permissions.
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-upgrade-backend-metrics
+  labels:
+    app.kubernetes.io/name: account-upgrade-backend
+    app.kubernetes.io/component: backend
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: account-upgrade-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -91,6 +109,10 @@ spec:
                 secretKeyRef:
                   name: account-upgrade-secrets
                   key: jwt-secret
+            # One JSON object per log line (Elastic Common Schema), with the request id as a field: ready for a log
+            # collector (Loki, Splunk, CloudWatch) without parsing rules.
+            - name: LOGGING_STRUCTURED_FORMAT_CONSOLE
+              value: ecs
           startupProbe:
             httpGet:
               path: /actuator/health/liveness

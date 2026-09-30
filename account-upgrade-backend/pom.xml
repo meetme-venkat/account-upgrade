@@ -53,6 +53,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Metrics in Prometheus format at /actuator/prometheus, scraped by deploy/k8s/monitoring. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- Event broker. Tests use an embedded broker (spring-kafka-test). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

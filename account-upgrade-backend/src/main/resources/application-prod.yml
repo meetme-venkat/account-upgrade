@@ -33,8 +33,8 @@ management:
   endpoints:
     web:
       exposure:
-        # No env, beans, configprops, heapdump etc.; metrics stay available for scraping.
-        include: health,info,metrics
+        # No env, beans, configprops, heapdump etc.; metrics stay available for scraping (prometheus: Prometheus).
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
