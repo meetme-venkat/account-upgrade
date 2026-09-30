@@ -64,6 +64,23 @@ class OutboxRelayTest extends IntegrationTestSupport {
     }
 
     @Test
+    void deliversTheOldestDueRowsFirst() {
+        enqueue(3);
+        // e0 waits for a retry, due after e1 and e2 although it was recorded first.
+        jdbc.sql("UPDATE notification_outbox SET next_attempt_at = :later WHERE event_id = 'e0'")
+                .param("later", java.time.OffsetDateTime.ofInstant(START.plusSeconds(10), java.time.ZoneOffset.UTC))
+                .update();
+        List<String> delivered = new CopyOnWriteArrayList<>();
+
+        relay((message, key) -> delivered.add(key), 20).relayPending();
+        assertThat(delivered).containsExactly("e1:USER", "e2:USER");
+
+        clock.advance(Duration.ofSeconds(10));
+        relay((message, key) -> delivered.add(key), 20).relayPending();
+        assertThat(delivered).containsExactly("e1:USER", "e2:USER", "e0:USER");
+    }
+
+    @Test
     void drainsSeveralBatchesInOnePoll() {
         enqueue(7);
         AtomicInteger delivered = new AtomicInteger();
