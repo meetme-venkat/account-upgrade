@@ -80,8 +80,19 @@ Desktop with:
 - **Container Engine: dockerd (moby)** (*Preferences → Container Engine*), so the cluster sees the images the
   pipeline builds;
 - **Kubernetes enabled** (*Preferences → Kubernetes*), which creates the `kubectl` context `rancher-desktop`;
-- at least **6 GB of memory and 4 CPUs** for its VM (*Preferences → Virtual Machine*): the deployment requests about
-  2.5 GB (3 Kafka brokers, 2 backends, PostgreSQL, 2 frontends), and k3s needs some too.
+- at least **6 GB of memory and 4 CPUs** available to it: the deployment requests about 2.5 GB (3 Kafka brokers,
+  2 backends, PostgreSQL, 2 frontends), and k3s needs some too. On Windows it runs in WSL, which gets half the
+  host's memory by default (limit it in `%USERPROFILE%\.wslconfig`, not in Rancher Desktop); on macOS and Linux set
+  it in *Preferences → Virtual Machine*.
+
+The command line equivalent of the first two settings, which also starts Rancher Desktop:
+
+```powershell
+rdctl start --kubernetes.enabled=true --container-engine.name=moby
+```
+
+If `docker` then fails with `timed out dialing Hyper-V socket` while Kubernetes works, restart Rancher Desktop
+(`rdctl shutdown`, then the command above).
 
 ```powershell
 # from a clone of the repository
