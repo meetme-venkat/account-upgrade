@@ -78,7 +78,7 @@ jobs:
             -e LIQUIBASE_COMMAND_USERNAME=postgres -e LIQUIBASE_COMMAND_PASSWORD=ci "$IMAGE" update
           docker exec pg-adopted psql -U postgres -d account_upgrade -tAc \
             "select string_agg(id || '=' || exectype, ',' order by orderexecuted) from databasechangelog" \
-            | grep -qx '001-processed-upgrades=MARK_RAN,002-notification-outbox=MARK_RAN,003-drop-flyway-schema-history=EXECUTED'
+            | grep -qx '001-processed-upgrades=MARK_RAN,002-notification-outbox=MARK_RAN,003-drop-flyway-schema-history=EXECUTED,004-outbox-id-allocated-in-blocks=EXECUTED'
           docker exec pg-adopted psql -U postgres -d account_upgrade -tAc \
             "select count(*) from information_schema.tables where table_name = 'flyway_schema_history'" | grep -qx 0
           docker exec pg-adopted psql -U postgres -d account_upgrade -tAc "select count(*) from processed_upgrades" | grep -qx 1
