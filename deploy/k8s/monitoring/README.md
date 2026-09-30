@@ -140,7 +140,10 @@ both at once with:
 deploy/k8s/monitoring/splunk-password.sh      # asks twice, without echoing; bash or Git Bash, in your own terminal
 ```
 
-- **Rules:** at least 8 characters, and no `"` or `\`.
+- **Rules:** no `"` or `\`; Splunk's password policy decides the rest.
+- **Current policy:** on this local cluster the minimum length was lowered to 5 (Settings → Password Management) so
+  that `admin` is accepted, like Jenkins' and Grafana's local logins. That is only acceptable because Splunk listens
+  on 127.0.0.1; anywhere else, restore the default of 8 and use a strong password.
 - **If Splunk refuses the new password:** the secret is left unchanged too.
 - **Don't change only one of them:** a password changed only in the UI, or only in the secret, makes Splunk fail on
   its next restart.

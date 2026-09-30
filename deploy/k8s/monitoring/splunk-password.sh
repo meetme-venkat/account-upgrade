@@ -4,8 +4,8 @@
 #
 #   deploy/k8s/monitoring/splunk-password.sh        prompts for the new password (not echoed); bash, Git Bash or Linux
 #
-# The password never appears on a command line or in the output. It must be at least 8 characters (Splunk's
-# default policy) and may not contain a double quote or backslash (it goes into the secret as JSON).
+# The password never appears on a command line or in the output. Its length is checked by Splunk's password policy
+# (Settings -> Password Management), and it may not contain a double quote or backslash (it goes into the secret as JSON).
 set -eu
 export MSYS_NO_PATHCONV=1
 k() { kubectl --context "${KUBE_CONTEXT:-rancher-desktop}" -n monitoring "$@"; }
@@ -17,7 +17,7 @@ if [ -t 0 ]; then
 else
     IFS= read -r PW || true
 fi
-[ "${#PW}" -ge 8 ] || { echo "At least 8 characters, please: nothing changed." >&2; exit 1; }
+[ -n "$PW" ] || { echo "Empty password: nothing changed." >&2; exit 1; }
 case "$PW" in *\"*|*\\*) echo "No \" or \\ in the password, please: nothing changed." >&2; exit 1 ;; esac
 
 # 1. Splunk: authenticated with the current password, from the secret (the two agree).
