@@ -72,14 +72,22 @@ public class OutboxRelay {
         } while (claimed == batchSize);
     }
 
-    /** @return the number of rows claimed in this batch */
+    /**
+     * Claims the due rows oldest first. The order matches the partial index {@code notification_outbox_pending}
+     * ({@code next_attempt_at, id WHERE sent_at IS NULL}), so only pending rows are read. Ordering by {@code id}
+     * alone let PostgreSQL walk the primary key past every delivered row once a large backlog made it expect many
+     * matches: 600 ms per batch with 1.3 million delivered rows kept for the retention period, versus 2 ms
+     * (deploy/load-test/batch-writes.md).
+     *
+     * @return the number of rows claimed in this batch
+     */
     int relayBatch() {
         Integer claimed = transactions.execute(status -> {
             List<OutboxRow> rows = jdbc.sql("""
                             SELECT id, event_id, role, recipient, subject, body, created_at, attempts
                             FROM notification_outbox
                             WHERE sent_at IS NULL AND attempts < :maxAttempts AND next_attempt_at <= :now
-                            ORDER BY id
+                            ORDER BY next_attempt_at, id
                             LIMIT :batchSize
                             FOR UPDATE SKIP LOCKED""")
                     .param("maxAttempts", maxAttempts)

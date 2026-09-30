@@ -157,7 +157,7 @@ killed. The 1 GiB limits stay: they are safe, and more cache means fewer disk re
    web API off) would give each its own CPU. On this single node they would still share it.
 5. **PostgreSQL is now the most loaded component** (~2.5 cores): one transaction per event. The next gain is
    **batching the database writes** (several events per transaction), a code change, then a larger PostgreSQL. More
-   connections or threads are not the next step (finding 3).
+   connections or threads are not the next step (finding 3). Done since: [batch-writes.md](batch-writes.md).
 
 ## Limits of this evidence
 

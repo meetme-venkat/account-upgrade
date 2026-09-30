@@ -15,6 +15,11 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,6 +32,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * the emails exist if and only if the decision is committed. A crash or a database error rolls everything
  * back and the redelivered event is processed cleanly; a concurrent duplicate (two instances, after a
  * rebalance) finds the decision taken and rolls its own work back.
+ *
+ * <p>{@link #handleAll} does the same for a batch of events in one transaction, with a few statements for the
+ * whole batch instead of a few per event: the consumers' main path.
  */
 @Service
 public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
@@ -67,6 +75,70 @@ public class UpgradeRequestHandlerImpl implements UpgradeRequestHandler {
         } finally {
             inProgress.remove(event.eventId()); // released on failure too, so a retry can process it
         }
+    }
+
+    @Override
+    public void handleAll(List<UpgradeRequestedEvent> events) {
+        // The same claims as handle(), for every event of the batch; an event delivered twice within the batch is
+        // processed once.
+        List<UpgradeRequestedEvent> claimed = new ArrayList<>(events.size());
+        Set<String> inBatch = new HashSet<>();
+        for (UpgradeRequestedEvent event : events) {
+            if (!inBatch.add(event.eventId())) {
+                log.info("Skipping duplicate event {} within the batch", event.eventId());
+            } else if (!inProgress.add(event.eventId())) {
+                log.info("Skipping event {}: already being processed by another consumer", event.eventId());
+            } else {
+                claimed.add(event);
+            }
+        }
+        try {
+            if (!claimed.isEmpty()) {
+                transactions.executeWithoutResult(status -> processBatch(claimed));
+            }
+        } finally {
+            claimed.forEach(event -> inProgress.remove(event.eventId()));
+        }
+    }
+
+    /**
+     * Three statements for the whole batch: which events are already stored, the new decisions (one insert that
+     * returns what it stored), and the emails of the decisions stored here. A decision another instance stored
+     * first is left out, and so are its emails: no rollback needed, unlike {@link #processOnce}.
+     */
+    private void processBatch(List<UpgradeRequestedEvent> events) {
+        Set<String> alreadyStored =
+                repository.findStoredEventIds(events.stream().map(UpgradeRequestedEvent::eventId).toList());
+        Map<UpgradeRequestedEvent, EligibilityResult> decisions = new LinkedHashMap<>();
+        List<ProcessedUpgrade> records = new ArrayList<>();
+        for (UpgradeRequestedEvent event : events) {
+            if (alreadyStored.contains(event.eventId())) {
+                log.info("Skipping duplicate event {}", event.eventId());
+                continue;
+            }
+            EligibilityResult result = eligibilityService.evaluate(event.request());
+            decisions.put(event, result);
+            // notificationSent: the emails are recorded in the outbox by this transaction or not at all; the
+            // repository derives their delivery from the outbox when reading.
+            records.add(new ProcessedUpgrade(event.eventId(), event.request().userId(), event.source(),
+                    result.eligible() ? ProcessingStatus.ELIGIBLE : ProcessingStatus.INELIGIBLE,
+                    result.reasons(), true, clock.instant()));
+        }
+        if (records.isEmpty()) {
+            return;
+        }
+        Set<String> stored = repository.saveAllIfAbsent(records);
+        if (stored.size() < records.size()) {
+            log.warn("{} of {} events were stored concurrently by another consumer", records.size() - stored.size(),
+                    records.size());
+            decisions.keySet().removeIf(event -> !stored.contains(event.eventId()));
+        }
+        notificationService.notifyDecisions(decisions);
+        records.stream().filter(record -> stored.contains(record.eventId())).forEach(record ->
+                log.debug("Processed event {} for user {}: {} {}", record.eventId(), record.userId(), record.status(),
+                        record.reasons()));
+        log.info("Processed a batch of {} events ({} skipped as duplicates)", stored.size(),
+                events.size() - stored.size());
     }
 
     private void processOnce(UpgradeRequestedEvent event, TransactionStatus status) {

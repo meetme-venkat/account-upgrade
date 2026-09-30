@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builds and sends the notifications for an eligibility decision:
@@ -57,6 +58,22 @@ public class NotificationService {
             }
         }
         return allSent;
+    }
+
+    /**
+     * Sends the notifications of several decisions at once (with the outbox: one insert), in the order given.
+     *
+     * <p>Unlike {@link #notifyDecision}, any failure is thrown: the caller's transaction then rolls back, and the
+     * events are processed one at a time, where a failed notification is tolerated per message.
+     *
+     * @param decisions the decision of each event, in processing order
+     */
+    public void notifyDecisions(Map<UpgradeRequestedEvent, EligibilityResult> decisions) {
+        List<EmailMessage> messages = new ArrayList<>();
+        decisions.forEach((event, result) -> messages.addAll(buildMessages(event, result)));
+        if (!messages.isEmpty()) {
+            emailSender.sendAll(messages);
+        }
     }
 
     List<EmailMessage> buildMessages(UpgradeRequestedEvent event, EligibilityResult result) {
