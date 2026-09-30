@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
 import static com.mercur.upgrade.TestRequests.eligible;
+import static com.mercur.upgrade.TestRequests.eligibleWithParent;
 import static com.mercur.upgrade.TestRequests.event;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,6 +71,34 @@ class UpgradeRequestHandlerImplConcurrencyTest extends IntegrationTestSupport {
 
         assertThat(count("processed_upgrades")).isEqualTo(1);
         assertThat(count("notification_outbox")).as("user must be emailed exactly once").isEqualTo(1);
+    }
+
+    @Test
+    void concurrentDuplicateBatchesNotifyAndStoreEachEventOnlyOnce() throws Exception {
+        CountDownLatch allInside = new CountDownLatch(8);
+        EligibilityService eligibility = mock(EligibilityService.class);
+        when(eligibility.evaluate(any())).thenAnswer(invocation -> {
+            allInside.countDown();
+            allInside.await(200, TimeUnit.MILLISECONDS); // widen the race window
+            return EligibilityResult.fromFailures(List.of());
+        });
+        UpgradeRequestHandlerImpl processor = processor(eligibility);
+        List<UpgradeRequestedEvent> batch = List.of(event(eligible()), event(eligibleWithParent()));
+
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<?>> futures = IntStream.range(0, 8)
+                    .<Future<?>>mapToObj(i -> pool.submit(() -> processor.handleAll(batch)))
+                    .toList();
+            for (Future<?> future : futures) {
+                future.get(10, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(count("processed_upgrades")).isEqualTo(2);
+        assertThat(count("notification_outbox")).as("user, user + parent, each exactly once").isEqualTo(3);
     }
 
     @Test

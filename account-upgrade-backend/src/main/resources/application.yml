@@ -46,6 +46,9 @@ spring:
     consumer:
       group-id: upgrade-eligibility
       auto-offset-reset: earliest
+      # Records per poll: the size of the batches KafkaUpgradeRequestListener processes in one transaction.
+      # Override with SPRING_KAFKA_CONSUMER_MAX_POLL_RECORDS.
+      max-poll-records: 500
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 

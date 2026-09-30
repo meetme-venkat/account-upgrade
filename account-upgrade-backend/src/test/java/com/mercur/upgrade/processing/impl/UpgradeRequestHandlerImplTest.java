@@ -20,12 +20,15 @@ import org.springframework.transaction.support.TransactionOperations;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static com.mercur.upgrade.TestRequests.NOW;
 import static com.mercur.upgrade.TestRequests.eligible;
 import static com.mercur.upgrade.TestRequests.event;
 import static com.mercur.upgrade.TestRequests.request;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -104,6 +107,79 @@ class UpgradeRequestHandlerImplTest {
 
         verifyNoInteractions(eligibilityService, notificationService);
         verify(repository, never()).saveIfAbsent(any());
+    }
+
+    @Test
+    void storesABatchOfDecisionsThenNotifiesThemTogether() {
+        UpgradeRequestedEvent approved = event(eligible());
+        UpgradeRequestedEvent declined = event(request("Carol", 40, "5"));
+        EligibilityResult ok = EligibilityResult.fromFailures(List.of());
+        EligibilityResult tooOld = EligibilityResult.fromFailures(List.of("too old"));
+        when(eligibilityService.evaluate(approved.request())).thenReturn(ok);
+        when(eligibilityService.evaluate(declined.request())).thenReturn(tooOld);
+        when(repository.saveAllIfAbsent(any())).thenReturn(Set.of(approved.eventId(), declined.eventId()));
+
+        processor.handleAll(List.of(approved, declined));
+
+        assertThat(savedBatch()).containsExactly(
+                new ProcessedUpgrade(approved.eventId(), "u-1", RequestSource.REALTIME, ProcessingStatus.ELIGIBLE,
+                        List.of(), true, NOW),
+                new ProcessedUpgrade(declined.eventId(), "u-3", RequestSource.REALTIME, ProcessingStatus.INELIGIBLE,
+                        List.of("too old"), true, NOW));
+        assertThat(notifiedBatch()).containsExactly(entry(approved, ok), entry(declined, tooOld));
+    }
+
+    @Test
+    void aBatchSkipsEventsAlreadyStoredAndDuplicatesWithinIt() {
+        UpgradeRequestedEvent done = event(eligible());
+        UpgradeRequestedEvent fresh = event(request("Carol", 20, "50"));
+        EligibilityResult ok = EligibilityResult.fromFailures(List.of());
+        when(repository.findStoredEventIds(List.of(done.eventId(), fresh.eventId())))
+                .thenReturn(Set.of(done.eventId()));
+        when(eligibilityService.evaluate(fresh.request())).thenReturn(ok);
+        when(repository.saveAllIfAbsent(any())).thenReturn(Set.of(fresh.eventId()));
+
+        processor.handleAll(List.of(done, fresh, fresh));
+
+        assertThat(savedBatch()).extracting(ProcessedUpgrade::eventId).containsExactly(fresh.eventId());
+        assertThat(notifiedBatch()).containsOnlyKeys(fresh);
+        verify(eligibilityService, never()).evaluate(done.request());
+    }
+
+    @Test
+    void aDecisionStoredConcurrentlyByAnotherConsumerIsNotNotifiedAgain() {
+        UpgradeRequestedEvent mine = event(eligible());
+        UpgradeRequestedEvent theirs = event(request("Carol", 20, "50"));
+        when(eligibilityService.evaluate(any())).thenReturn(EligibilityResult.fromFailures(List.of()));
+        when(repository.saveAllIfAbsent(any())).thenReturn(Set.of(mine.eventId()));
+
+        processor.handleAll(List.of(mine, theirs));
+
+        assertThat(notifiedBatch()).containsOnlyKeys(mine);
+    }
+
+    @Test
+    void aBatchOfOnlyProcessedEventsWritesNothing() {
+        UpgradeRequestedEvent done = event(eligible());
+        when(repository.findStoredEventIds(any())).thenReturn(Set.of(done.eventId()));
+
+        processor.handleAll(List.of(done));
+        processor.handleAll(List.of());
+
+        verify(repository, never()).saveAllIfAbsent(any());
+        verifyNoInteractions(eligibilityService, notificationService);
+    }
+
+    private List<ProcessedUpgrade> savedBatch() {
+        ArgumentCaptor<List<ProcessedUpgrade>> captor = ArgumentCaptor.captor();
+        verify(repository).saveAllIfAbsent(captor.capture());
+        return captor.getValue();
+    }
+
+    private Map<UpgradeRequestedEvent, EligibilityResult> notifiedBatch() {
+        ArgumentCaptor<Map<UpgradeRequestedEvent, EligibilityResult>> captor = ArgumentCaptor.captor();
+        verify(notificationService).notifyDecisions(captor.capture());
+        return captor.getValue();
     }
 
     private ProcessedUpgrade savedRecord() {

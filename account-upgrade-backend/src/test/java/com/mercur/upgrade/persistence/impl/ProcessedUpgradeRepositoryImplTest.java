@@ -12,7 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.IntStream;
 
 import static com.mercur.upgrade.TestRequests.NOW;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +59,47 @@ class ProcessedUpgradeRepositoryImplTest extends IntegrationTestSupport {
 
         assertThat(repository.findAll()).extracting(ProcessedUpgrade::eventId)
                 .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 20).mapToObj(i -> "e" + i).toList());
+    }
+
+    @Test
+    void savesABatchInListOrderAndReturnsOnlyWhatItStored() {
+        repository.saveIfAbsent(decision("e2", "u1", ProcessingStatus.ELIGIBLE));
+
+        Set<String> stored = repository.saveAllIfAbsent(List.of(
+                decision("e1", "u1", ProcessingStatus.ELIGIBLE),
+                decision("e2", "other", ProcessingStatus.INELIGIBLE, "already there"),
+                decision("e3", "u1", ProcessingStatus.INELIGIBLE, "r1", "r2")));
+
+        assertThat(stored).containsExactly("e1", "e3");
+        assertThat(repository.findAll()).extracting(ProcessedUpgrade::eventId).containsExactly("e2", "e1", "e3");
+        assertThat(repository.findAll().get(2))
+                .isEqualTo(decision("e3", "u1", ProcessingStatus.INELIGIBLE, "r1", "r2"));
+        assertThat(repository.saveAllIfAbsent(List.of())).isEmpty();
+    }
+
+    @Test
+    void savesAndFindsBatchesLargerThanOneStatement() {
+        int size = ProcessedUpgradeRepositoryImpl.MAX_ROWS_PER_STATEMENT * 2 + 7;
+        List<ProcessedUpgrade> records = IntStream.range(0, size)
+                .mapToObj(i -> decision("e" + i, "u1", ProcessingStatus.ELIGIBLE)).toList();
+
+        assertThat(repository.saveAllIfAbsent(records)).hasSize(size);
+
+        assertThat(repository.findAll()).extracting(ProcessedUpgrade::eventId)
+                .containsExactlyElementsOf(records.stream().map(ProcessedUpgrade::eventId).toList());
+        List<String> asked = new ArrayList<>(records.stream().map(ProcessedUpgrade::eventId).toList());
+        asked.add("not-stored");
+        assertThat(repository.findStoredEventIds(asked)).hasSize(size).doesNotContain("not-stored");
+        assertThat(repository.saveAllIfAbsent(records)).as("all duplicates now").isEmpty();
+    }
+
+    @Test
+    void findsWhichEventIdsAreStored() {
+        repository.saveIfAbsent(decision("e1", "u1", ProcessingStatus.ELIGIBLE));
+        repository.saveIfAbsent(decision("e3", "u1", ProcessingStatus.ELIGIBLE));
+
+        assertThat(repository.findStoredEventIds(List.of("e1", "e2", "e3"))).containsExactlyInAnyOrder("e1", "e3");
+        assertThat(repository.findStoredEventIds(List.of())).isEmpty();
     }
 
     @Test

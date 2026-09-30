@@ -12,9 +12,14 @@ import tools.jackson.databind.json.JsonMapper;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * PostgreSQL store shared by all instances.
@@ -36,6 +41,9 @@ public class ProcessedUpgradeRepositoryImpl implements ProcessedUpgradeRepositor
                                WHERE o.event_id = p.event_id AND o.sent_at IS NULL) AS notification_sent
             FROM processed_upgrades p
             """;
+
+    /** Rows per multi-row statement: well below PostgreSQL's 65,535 bind parameters (6 per row). */
+    static final int MAX_ROWS_PER_STATEMENT = 1000;
 
     private final JdbcClient jdbc;
     private final JsonMapper jsonMapper;
@@ -68,6 +76,52 @@ public class ProcessedUpgradeRepositoryImpl implements ProcessedUpgradeRepositor
                 .param("processedAt", OffsetDateTime.ofInstant(processed.processedAt(), ZoneOffset.UTC))
                 .update();
         return inserted == 1;
+    }
+
+    /**
+     * One multi-row {@code INSERT ... ON CONFLICT DO NOTHING RETURNING event_id} per {@value #MAX_ROWS_PER_STATEMENT}
+     * records. PostgreSQL assigns {@code seq} in the order of the {@code VALUES} rows, so the list order is the store
+     * order. A record whose event id exists, or is being inserted by another transaction that then commits, is
+     * skipped and not returned.
+     */
+    @Override
+    public Set<String> saveAllIfAbsent(List<ProcessedUpgrade> processedUpgrades) {
+        Set<String> stored = new LinkedHashSet<>();
+        for (int from = 0; from < processedUpgrades.size(); from += MAX_ROWS_PER_STATEMENT) {
+            List<ProcessedUpgrade> rows =
+                    processedUpgrades.subList(from, Math.min(from + MAX_ROWS_PER_STATEMENT, processedUpgrades.size()));
+            StringBuilder sql = new StringBuilder("INSERT INTO processed_upgrades "
+                    + "(event_id, user_id, source, status, reasons, processed_at) VALUES ");
+            Map<String, Object> params = new HashMap<>();
+            for (int i = 0; i < rows.size(); i++) {
+                ProcessedUpgrade row = rows.get(i);
+                sql.append(i == 0 ? "" : ", ")
+                        .append("(:eventId%1$d, :userId%1$d, :source%1$d, :status%1$d, :reasons%1$d, :processedAt%1$d)"
+                                .formatted(i));
+                params.put("eventId" + i, row.eventId());
+                params.put("userId" + i, row.userId());
+                params.put("source" + i, row.source().name());
+                params.put("status" + i, row.status().name());
+                params.put("reasons" + i, jsonMapper.writeValueAsString(row.reasons()));
+                params.put("processedAt" + i, OffsetDateTime.ofInstant(row.processedAt(), ZoneOffset.UTC));
+            }
+            sql.append(" ON CONFLICT (event_id) DO NOTHING RETURNING event_id");
+            stored.addAll(jdbc.sql(sql.toString()).params(params).query(String.class).list());
+        }
+        return stored;
+    }
+
+    @Override
+    public Set<String> findStoredEventIds(Collection<String> eventIds) {
+        List<String> ids = List.copyOf(eventIds);
+        Set<String> stored = new HashSet<>();
+        for (int from = 0; from < ids.size(); from += MAX_ROWS_PER_STATEMENT) {
+            stored.addAll(jdbc.sql("SELECT event_id FROM processed_upgrades WHERE event_id IN (:eventIds)")
+                    .param("eventIds", ids.subList(from, Math.min(from + MAX_ROWS_PER_STATEMENT, ids.size())))
+                    .query(String.class)
+                    .list());
+        }
+        return stored;
     }
 
     @Override
