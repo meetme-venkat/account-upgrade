@@ -1,4 +1,4 @@
-# Metrics and dashboards for the Account Upgrade platform: Prometheus and Grafana in the "monitoring" namespace,
+# Metrics, logs and dashboards for the Account Upgrade platform: Prometheus, Loki, Alloy, Grafana and Splunk in "monitoring",
 # and two exporters next to what they watch in "account-upgrade" (Kafka consumer lag, PostgreSQL activity).
 # Install or update with deploy/k8s/monitoring/install.sh; see README.md. Independent of the application's
 # pipeline: the platform runs the same with or without it.
@@ -14,6 +14,9 @@ resources:
   - namespace.yaml
   - exporters.yaml
   - prometheus.yaml
+  - loki.yaml
+  - alloy.yaml
+  - splunk.yaml
   - grafana.yaml
 
 configMapGenerator:

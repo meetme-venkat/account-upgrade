@@ -1,6 +1,6 @@
-# Monitoring: Prometheus and Grafana
+# Monitoring: Prometheus, Loki, Grafana and Splunk
 
-Live metrics and one dashboard for the platform, in the same cluster. Everything here is open source and free; the
+Live metrics, searchable logs and one dashboard for the platform, in the same cluster. Everything here is open source and free; the
 only cost is the cluster capacity it uses.
 
 ## What runs
@@ -8,7 +8,10 @@ only cost is the cluster capacity it uses.
 | Component | Namespace | Does | Resources (request / limit) |
 |---|---|---|---|
 | Prometheus `v3.5.0` | `monitoring` | Scrapes every 15 s, keeps 7 days (at most 4 GB) on a 5 Gi volume | 256 / 768 MiB |
-| Grafana `12.1.1` | `monitoring` | The "Account Upgrade" dashboard, on http://127.0.0.1:3000 | 128 / 384 MiB |
+| Loki `3.5.3` | `monitoring` | Stores the logs of every pod in `account-upgrade` for 7 days on a 5 Gi volume | 256 / 768 MiB |
+| Alloy `v1.10.2` | `monitoring` | Ships those logs to Loki and Splunk, reading them through the Kubernetes API | 96 / 384 MiB |
+| Splunk Enterprise `10.0.1` | `monitoring` | The same logs, searchable in Splunk, on http://127.0.0.1:8000 (10 Gi volume) | 2 / 4 GiB |
+| Grafana `12.1.1` | `monitoring` | The "Account Upgrade" dashboard and log search, on http://127.0.0.1:3000 | 128 / 384 MiB |
 | kafka-exporter `v1.9.0` | `account-upgrade` | Topic offsets and consumer-group lag | 32 / 96 MiB |
 | postgres-exporter `v0.17.1` | `account-upgrade` | Transactions, connections, rows written | 32 / 96 MiB |
 
@@ -54,6 +57,7 @@ The dashboard is provisioned from [`dashboards/account-upgrade.json`](dashboards
 | Notifications | Emails sent/s per pod; emails waiting and failed |
 | Database | Connection pool per pod (active, pending, size); PostgreSQL commits and rollbacks/s; connections and rows written/s |
 | Backend JVM | CPU, heap, threads and GC pause time per pod |
+| Logs | Backend log lines/s by level; backend warnings and errors; logs of everything else (Kafka, PostgreSQL, frontend, jobs) |
 
 The metrics come from the backend (`/actuator/prometheus`):
 
@@ -74,19 +78,90 @@ The metrics come from the backend (`/actuator/prometheus`):
 In Kubernetes the backend logs one JSON object per line, in the Elastic Common Schema (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` in
 [backend.yaml](../base/backend.yaml)). The request id is a field (`requestId`), so logs can be searched by request:
 
-```sh
-kubectl -n account-upgrade logs -l app.kubernetes.io/name=account-upgrade-backend --since=10m | grep '"requestId":"<id>"'
+**How logs reach Loki**
+- **Collection:** Alloy follows the logs of every pod in `account-upgrade` through the Kubernetes API. That needs no
+  access to the nodes, and its permissions are a Role in that one namespace: list pods and read their logs.
+- **Labels:** each line is labelled with `namespace`, `app`, `component`, `pod` and `container`. Backend lines also
+  get `level` (INFO, WARN, ERROR), so errors can be selected without parsing every line.
+- **Resuming:** Alloy records how far it has read each pod. After a restart it continues from there instead of
+  re-sending.
+
+**Searching.** In Grafana, open **Explore**, choose **Loki**, then query:
+
+```
+{app="account-upgrade-backend", level="ERROR"}                               errors from any backend pod
+{app="account-upgrade-backend"} | json | requestId="<id>"                    one request, across pods
+{app="account-upgrade-backend"} | json | log_logger=~".*OutboxRelay"         the email relay
+sum by (level) (rate({app="account-upgrade-backend"}[1m]))                   log lines/s by level
+{app="kafka"} |= "ERROR"                                                     broker errors
 ```
 
-This stack doesn't collect logs. Grafana Loki, or Splunk through its OpenTelemetry Collector and HTTP Event Collector,
-can ingest these lines as they are, without parsing rules.
+`| json` turns every field of a backend line into a label for that query. Examples: `log_logger`,
+`process_thread_name`, `message`, `requestId`.
+
+**Volume.** The backend logs one line per email sent, so a 100,000-request run writes about 250,000 lines. Loki's
+limits are raised for that (16 MB/s). In production, lowering `EmailChannelImpl`'s logger to WARN would remove
+most of the volume.
+
+## Splunk
+
+Splunk receives the same lines as Loki. Alloy sends them to Splunk's HTTP Event Collector (HEC), inside the cluster.
+
+**Logging in.** Open http://127.0.0.1:8000 and log in as `admin`. The password is in the secret `splunk`:
+
+```sh
+kubectl -n monitoring get secret splunk -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+**Searching**
+
+```
+index=main source=account-upgrade app=account-upgrade-backend level=ERROR          backend errors
+index=main source=account-upgrade requestId=<id>                                    one request, across pods
+index=main source=account-upgrade app=account-upgrade-backend | stats count by level, pod
+index=main source=account-upgrade app=kafka "ERROR"                                  broker errors
+```
+
+**Fields**
+- The Kubernetes labels (`app`, `pod`, `container`, `component`, `level`) are indexed fields.
+- Backend lines have the sourcetype `_json`, so their JSON fields (`requestId`, `log.logger`, `message`, …) are
+  extracted.
+- Other lines are `kube:container` (plain text). Splunk rejects a non-JSON line sent as `_json`.
+
+**Licence.** `splunk.yaml` accepts the Splunk General Terms and licence, as the image requires. It starts as a
+60-day Enterprise trial. After that, switch to the Free licence under Settings → Licensing: it indexes up to 500 MB
+a day and has **no login**, so keep port 8000 on 127.0.0.1.
+
+**Changing the admin password.** Splunk keeps its password in its own configuration on the volume. The secret is
+used for the first setup, and afterwards by the image's startup script to log in, so the two must match. Change
+both at once with:
+
+```sh
+deploy/k8s/monitoring/splunk-password.sh      # asks twice, without echoing; bash or Git Bash, in your own terminal
+```
+
+- **Rules:** no `"` or `\`; Splunk's password policy decides the rest.
+- **Current policy:** on this local cluster the minimum length was lowered to 5 (Settings → Password Management) so
+  that `admin` is accepted, like Jenkins' and Grafana's local logins. That is only acceptable because Splunk listens
+  on 127.0.0.1; anywhere else, restore the default of 8 and use a strong password.
+- **If Splunk refuses the new password:** the secret is left unchanged too.
+- **Don't change only one of them:** a password changed only in the UI, or only in the secret, makes Splunk fail on
+  its next restart.
+
+**Running as non-root.** The image normally uses sudo to switch users. Here it runs directly as the `splunk` user
+(`restricted` Pod Security):
+- supplementary group 999 owns the image's state directory;
+- `SPLUNK_HOME_OWNERSHIP_ENFORCEMENT=false` skips a `chown` that needs root.
 
 ## On AWS (EKS)
 
 The manifests run unchanged. The software costs nothing, but its infrastructure does:
 
-- **Node capacity:** about 1–1.5 GiB of memory and 0.2 vCPU.
-- **Storage:** an EBS volume for Prometheus (5 Gi).
+- **Node capacity:** about 1.5–2.5 GiB of memory and 0.3 vCPU, plus 2–4 GiB and 0.5 vCPU for Splunk.
+- **Splunk licence:** Splunk Enterprise beyond the trial or the 500 MB/day Free licence is paid, per GB indexed per day;
+  Splunk Cloud is the managed alternative.
+- **Storage:** EBS volumes for Prometheus and Loki (5 Gi each). Loki is normally pointed at an S3 bucket instead
+  (`object_store: s3`), which is cheaper per GB and removes the volume.
 - **Grafana's Service:** change it to `ClusterIP` and use `kubectl port-forward` or an internal ingress. As a
   `LoadBalancer` it would create a public, billed load balancer.
 - **Database user:** give postgres-exporter its own database role with only `pg_monitor` (a schema changeset) instead

@@ -202,6 +202,33 @@
       ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+
+    { "type": "row", "title": "Logs (Loki)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Backend log lines /s by level",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 51 },
+      "targets": [{ "refId": "A", "expr": "sum by (level) (rate({namespace=\"account-upgrade\", app=\"account-upgrade-backend\"}[1m]))", "legendFormat": "{{level}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "ERROR" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+        { "matcher": { "id": "byName", "options": "WARN" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+      ] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "logs", "title": "Backend warnings and errors", "description": "Every line is JSON; expand one to see its fields, including requestId.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 51 },
+      "targets": [{ "refId": "A", "expr": "{namespace=\"account-upgrade\", app=\"account-upgrade-backend\", level=~\"WARN|ERROR\"}" }],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "prettifyLogMessage": false }
+    },
+    {
+      "type": "logs", "title": "All platform logs (Kafka, PostgreSQL, frontend, jobs)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 59 },
+      "targets": [{ "refId": "A", "expr": "{namespace=\"account-upgrade\", app!=\"account-upgrade-backend\"}" }],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
     }
   ]
 }

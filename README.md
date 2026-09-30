@@ -58,8 +58,8 @@ Every push to `main` is tested, built, scanned and deployed to Kubernetes (Ranch
 
 ## Monitoring
 
-Prometheus and Grafana run in the same cluster, with an "Account Upgrade" dashboard: requests, Kafka backlog,
-decisions, emails, database and JVM per pod, at http://127.0.0.1:3000. The backend logs JSON, with a request id per
-line. Install and details: [deploy/k8s/monitoring/README.md](deploy/k8s/monitoring/README.md).
+Prometheus, Loki, Grafana and Splunk run in the same cluster, with an "Account Upgrade" dashboard: requests, Kafka backlog,
+decisions, emails, database, JVM per pod and logs, at http://127.0.0.1:3000. The backend logs JSON, with a request id per
+line, searchable in Grafana (Loki) and Splunk (http://127.0.0.1:8000). Install and details: [deploy/k8s/monitoring/README.md](deploy/k8s/monitoring/README.md).
 
 See [the backend README](account-upgrade-backend/README.md) for API details and sample payloads, and [the frontend README](account-upgrade-frontend/README.md) for deployment settings.
