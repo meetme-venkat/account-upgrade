@@ -1,0 +1,11 @@
+## Configuration
+SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-0.kafka:9092,kafka-1.kafka:9092,kafka-2.kafka:9092
+UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR=3
+UPGRADE_MESSAGING_KAFKA_MIN_INSYNC_REPLICAS=2
+UPGRADE_MESSAGING_PARTITIONS=8
+UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY=4
+UPGRADE_GUARDRAILS_RATE_LIMIT_ENABLED=false
+backend replicas: 2
+kafka memory limit: 1Gi
+postgres memory limit: 1Gi
+Topic: upgrade-requests	TopicId: r0cRXAmtR62tVbU-b25SNA	PartitionCount: 8	ReplicationFactor: 3	Configs: min.insync.replicas=2

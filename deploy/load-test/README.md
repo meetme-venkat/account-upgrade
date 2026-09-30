@@ -1,5 +1,7 @@
 # Peak load test: 10,000 real-time requests
 
+> The same test at 100,000 requests, with its own before and after: [peak-100k.md](peak-100k.md).
+
 **Question.** What happens when 10,000 upgrade requests arrive at once, each as its own real-time call, and what
 should be sized for it: Kafka, the database connections, consumer threads, or pods?
 
@@ -11,8 +13,9 @@ should be sized for it: Kafka, the database connections, consumer threads, or po
 - **Drained in seconds.** The backlog queued in Kafka and was processed and notified **~12 s** after the first
   request with 4 consumers, and **~9 s** with 8 consumers.
 - **Database connections are not the limit.** At most 7 of the 20 connections were ever busy.
-- **Memory headroom was the real risk, now fixed.** PostgreSQL reached **98.6 %** of its memory limit and one Kafka
-  broker went **above** Kafka's old limit.
+- **Memory headroom: raised, but less critical than first reported.** `kubectl top` showed PostgreSQL at 98.6 % of its
+  limit and a Kafka broker above Kafka's old limit. The 100,000-request test later showed that this figure is mostly
+  file cache, which the kernel frees before killing a container (see the correction under Findings).
 
 | | Before | After |
 |---|---|---|
@@ -74,7 +77,7 @@ Kafka 640 MiB, PostgreSQL 512 MiB, 4 partitions, 2 threads per pod.
 | before-2 | 2.5 | 4,031 | 41 / 99 / 168 | 0 | 12.2 | 12.4 | 0 |
 
 **Peak memory against the limit:**
-- PostgreSQL **505 MiB of 512 MiB (98.6 %)**
+- PostgreSQL **505 MiB of 512 MiB (98.6 %)**, as `kubectl top` reports it, file cache included (see the correction in Findings)
 - Kafka 571 MiB of 640 MiB (89 %)
 
 **Busy database connections:** at most 2–4 of 21.
@@ -93,7 +96,7 @@ partition each.
 | after-5 | 2.3 | 4,258 | 42 / 80 / 108 | 0 | 11.5 | 11.8 | 0 |
 
 **Peak memory against the limit:**
-- Kafka **657 MiB, above the old 640 MiB limit**, now 64 % of 1 GiB
+- Kafka **657 MiB, above the old 640 MiB limit**, now 64 % of 1 GiB (file cache included)
 - PostgreSQL 420 MiB of 1 GiB (41 %; its cache was still refilling after its restart)
 
 **Busy database connections:** at most 5–7 of 21.
@@ -129,9 +132,16 @@ same deployment: the new configuration with 2 threads per pod set temporarily, a
 2. **Database connections were never the bottleneck.** At most 7 of 20 were busy, even with 8 consumers. Each consumer
    uses one connection at a time, so the rule is **consumer threads per pod < connections per pod**. More connections
    would not have helped.
-3. **Memory headroom was the real risk.** PostgreSQL reached 98.6 % of its limit and Kafka exceeded its old limit.
-   Past its limit, a container is killed, which would have stopped the whole flow in the middle of a peak. Both limits
-   are now 1 GiB.
+3. **Memory headroom: raised to 1 GiB. Correction: this was less of a risk than first stated.** This finding first
+   said PostgreSQL (98.6 %) and Kafka (above 640 MiB) were about to be killed. The 100,000-request test
+   ([peak-100k.md](peak-100k.md)) broke the containers' memory down:
+   - `kubectl top` reports memory including the **file cache**, the operating system caching data files, which the
+     kernel frees under pressure before it kills anything.
+   - PostgreSQL's own memory was only ~36 MiB plus 140 MiB of shared buffers; the rest was cache. It was never close
+     to being killed: a bigger limit only means more cache and fewer disk reads.
+   - Kafka's own memory was ~410 MiB, 64 % of the old 640 MiB limit: real headroom, not an imminent failure.
+
+   Neither container ever reached its limit (`memory.events`: max 0, oom_kill 0).
 4. **Doubling the consumers gave ~21–27 %, not 2×.** Accepting and latency are unchanged. The processing side scales
    below linearly: each event is still its own database transaction, one commit each, on one PostgreSQL instance. The
    next gain is fewer transactions (processing events in batches), not more threads or pods. That is an inference from

@@ -1,0 +1,8 @@
+## Result
+k6: {"runId":"peak-1790767066","requests":10000,"vus":200,"testSeconds":4.933789249,"httpRequests":10001,"requestsPerSecond":2027.0423999215293,"accepted":10000,"notAccepted":0,"failedRate":0,"latencyMs":{"p(90)":150.798874,"p(95)":191.034079,"p(99)":518.365881,"max":657.135101,"avg":91.79320144655512,"min":6.505477,"med":75.248545}}
+k6 container: 2026-09-30T11:17:51Z -> 2026-09-30T11:17:57Z
+seconds from the first request to: last accepted 6, last processed 12.1, last email sent 12.1
+timeline until processed and notified: 17 s (includes the k6 pod start-up)
+processed: 10000
+eligible / ineligible: ELIGIBLE=3000, INELIGIBLE=7000
+dead letters added: 0
