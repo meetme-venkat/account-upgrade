@@ -3,7 +3,7 @@
 An event-driven Spring Boot service that ingests account upgrade requests from two channels: batch and real-time. It checks each request against
 the eligibility rules, notifies the user (and the parent, where relevant), stores the outcome and serves it back over REST.
 
-- **Stack:** Java 17+, Spring Boot 4.1, Kafka (Spring Kafka), PostgreSQL (JDBC; schema owned by the [`account-update-db-schema`](../account-update-db-schema) service), JUnit 5, Mockito, AssertJ, Awaitility
+- **Stack:** Java 17+, Spring Boot 4.1, Kafka (Spring Kafka), PostgreSQL (Spring Data JPA / Hibernate, native SQL for the duplicate-safe inserts; schema owned by the [`account-update-db-schema`](../account-update-db-schema) service), JUnit 5, Mockito, AssertJ, Awaitility
 - **Infrastructure:** PostgreSQL and Kafka, always as containers: `spring-boot:run` starts them (Docker Compose support), tests use Testcontainers, and deployments point at managed services (e.g. RDS, MSK).
 
 ## Architecture

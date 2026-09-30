@@ -24,6 +24,23 @@ spring:
       connection-timeout: 3000 # milliseconds (HikariCP does not accept duration strings)
       # Backstop against lock waits (e.g. two instances racing on the same event) and runaway queries.
       connection-init-sql: SET lock_timeout = '5s'; SET statement_timeout = '10s'
+      data-source-properties:
+        # Sends Hibernate's batched inserts (e.g. a batch's emails) as multi-row statements.
+        reWriteBatchedInserts: true
+
+  jpa:
+    # No session held open across web requests: every database access happens in the services' transactions.
+    open-in-view: false
+    hibernate:
+      # The schema belongs to account-update-db-schema (Liquibase). Hibernate only checks that the entities match it,
+      # and refuses to start if they don't.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          # Inserts of many entities (a batch's emails) go to the database in groups of this size.
+          batch_size: 50
+        order_inserts: true
 
   kafka:
     producer:

@@ -12,7 +12,7 @@ Activate them with `SPRING_PROFILES_ACTIVE=prod`. The Docker image sets `prod` b
 |---|---|---|
 | Wildcard CORS origin (`*`) | Startup fails | List exact origins in `UPGRADE_WEB_CORS_ALLOWED_ORIGINS` |
 | Kafka replication factor < 3, `min.insync.replicas` < 2, or minISR ≥ RF | Startup fails | Set `UPGRADE_MESSAGING_KAFKA_REPLICATION_FACTOR=3` and `_MIN_INSYNC_REPLICAS=2`. Topics then survive a broker failure with every acknowledged write on 2 brokers |
-| The transaction manager isn't the JDBC one | Startup fails | Happens if something else (for example a Kafka transaction manager from `spring.kafka.producer.transaction-id-prefix`) replaces it. The decision and outbox writes would silently stop sharing a transaction |
+| The transaction manager isn't the JPA one | Startup fails | Happens if something else (for example a Kafka transaction manager from `spring.kafka.producer.transaction-id-prefix`) replaces it. The decision and outbox writes would silently stop sharing a transaction |
 | Rate limit disabled | Warning logged | Re-enable it, or make sure a gateway rate-limits `/api` |
 | Access tokens signed with the development key from `application.yml` | Startup fails | Set `UPGRADE_SECURITY_JWT_SECRET` to a random value of at least 32 bytes (`openssl rand -base64 48`) |
 | Administrator still uses the default `admin` / `admin` | Warning logged | Set `UPGRADE_SECURITY_ADMIN_PASSWORD` |

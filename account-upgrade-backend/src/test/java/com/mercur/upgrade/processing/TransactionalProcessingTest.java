@@ -74,24 +74,20 @@ class TransactionalProcessingTest extends IntegrationTestSupport {
         UpgradeRequestedEvent event = event(eligibleWithParent());
         // Both instances pass the "already processed?" check before either writes anything.
         CyclicBarrier bothChecked = new CyclicBarrier(2);
-        EmailSender barrierThenOutbox = new EmailSender() {
-            private final ThreadLocal<Boolean> waited = ThreadLocal.withInitial(() -> false);
-
+        ProcessedUpgradeRepository checkThenWait = new DelegatingRepository(repository) {
             @Override
-            public void send(com.mercur.upgrade.notification.EmailMessage message) {
-                if (!waited.get()) {
-                    waited.set(true);
-                    try {
-                        bothChecked.await(10, TimeUnit.SECONDS);
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
+            public boolean existsByEventId(String eventId) {
+                boolean exists = super.existsByEventId(eventId);
+                try {
+                    bothChecked.await(10, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
                 }
-                outbox.send(message);
+                return exists;
             }
         };
-        UpgradeRequestHandlerImpl serverA = instance(barrierThenOutbox, repository);
-        UpgradeRequestHandlerImpl serverB = instance(barrierThenOutbox, repository);
+        UpgradeRequestHandlerImpl serverA = instance(outbox, checkThenWait);
+        UpgradeRequestHandlerImpl serverB = instance(outbox, checkThenWait);
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {

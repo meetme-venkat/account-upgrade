@@ -2,44 +2,36 @@ package com.mercur.upgrade.notification.impl;
 
 import com.mercur.upgrade.notification.EmailMessage;
 import com.mercur.upgrade.notification.NotificationLog;
-import com.mercur.upgrade.notification.RecipientRole;
+import com.mercur.upgrade.notification.jpa.OutboxEmailEntity;
+import com.mercur.upgrade.notification.jpa.OutboxEmailJpaRepository;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 
-import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** Recently delivered emails from the outbox, shared by all instances. */
 @Component
 public class NotificationLogImpl implements NotificationLog {
 
-    private final JdbcClient jdbc;
+    private final OutboxEmailJpaRepository outbox;
     private final int capacity;
 
-    public NotificationLogImpl(JdbcClient jdbc, @Value("${upgrade.notification.outbox-capacity:1000}") int capacity) {
-        this.jdbc = jdbc;
+    public NotificationLogImpl(OutboxEmailJpaRepository outbox,
+                               @Value("${upgrade.notification.outbox-capacity:1000}") int capacity) {
+        this.outbox = outbox;
         this.capacity = capacity;
     }
 
     @Override
     public List<EmailMessage> sentMessages() {
-        return jdbc.sql("""
-                        SELECT * FROM (
-                            SELECT id, event_id, role, recipient, subject, body, created_at
-                            FROM notification_outbox
-                            WHERE sent_at IS NOT NULL
-                            ORDER BY id DESC
-                            LIMIT :capacity) newest
-                        ORDER BY id""")
-                .param("capacity", capacity)
-                .query((rs, rowNum) -> new EmailMessage(
-                        rs.getString("event_id"),
-                        RecipientRole.valueOf(rs.getString("role")),
-                        rs.getString("recipient"),
-                        rs.getString("subject"),
-                        rs.getString("body"),
-                        rs.getObject("created_at", OffsetDateTime.class).toInstant()))
-                .list();
+        List<EmailMessage> newestFirst = outbox.findBySentAtIsNotNullOrderByIdDesc(Limit.of(capacity)).stream()
+                .map(OutboxEmailEntity::toMessage)
+                .collect(Collectors.toCollection(ArrayList::new));
+        Collections.reverse(newestFirst);
+        return newestFirst;
     }
 }
