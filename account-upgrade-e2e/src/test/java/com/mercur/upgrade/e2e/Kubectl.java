@@ -61,6 +61,37 @@ final class Kubectl {
         return run("exec", "postgres-0", "--", "psql", "-U", "postgres", "-d", "account_upgrade", "-tAc", query);
     }
 
+    /** A count from psql, e.g. {@code sqlCount("select count(*) from ...")}. */
+    static long sqlCount(String query) {
+        return Long.parseLong(sql(query));
+    }
+
+    /** Messages on the dead-letter topic, over all partitions (output: one topic:partition:offset line each). */
+    static long deadLetters() {
+        return kafka("kafka-get-offsets.sh", "--topic", E2eSettings.TOPIC + "-dlq")
+                .lines().filter(line -> !line.isBlank())
+                .mapToLong(line -> Long.parseLong(line.split(":")[2].strip()))
+                .sum();
+    }
+
+    /** Names of the running pods of a component (app.kubernetes.io/component). */
+    static List<String> pods(String component) {
+        String names = run("get", "pods", "--selector", "app.kubernetes.io/component=" + component,
+                "--field-selector", "status.phase=Running", "-o", "jsonpath={.items[*].metadata.name}");
+        return names.isBlank() ? List.of() : List.of(names.split("\\s+"));
+    }
+
+    /** One value of a backend pod's actuator metric, read inside the pod (each pod has its own). */
+    static double backendMetric(String pod, String metricAndTags) {
+        String json = run("exec", pod, "--", "wget", "-qO-", "http://127.0.0.1:8080/actuator/metrics/" + metricAndTags);
+        try {
+            return ApiClient.JSON.readTree(json).path("measurements").get(0).path("value").asDouble();
+        }
+        catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     /** A Kafka command-line tool, run in the first broker's pod against itself. */
     static String kafka(String tool, String... args) {
         List<String> command = new ArrayList<>(List.of(

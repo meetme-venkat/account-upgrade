@@ -75,6 +75,12 @@
                     <!-- Leave out groups of checks with -DexcludedGroups=infrastructure and/or rate-limit (JUnit tags).
                          -De2e.* settings on the command line reach the tests as system properties. -->
                     <trimStackTrace>true</trimStackTrace>
+                    <!-- The corner-case and soak suites run only on demand (profiles below). -->
+                    <excludes>
+                        <exclude>**/*$*</exclude>
+                        <exclude>**/CornerCasesTest*</exclude>
+                        <exclude>**/SoakTest*</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -103,5 +109,48 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- mvnw verify -Pcorner-cases: the live corner cases, results in test-results/corner-cases.md. -->
+        <profile>
+            <id>corner-cases</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes combine.self="override">
+                                <include>**/CornerCasesTest.java</include>
+                            </includes>
+                            <excludes combine.self="override">
+                                <exclude>**/*$*</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- mvnw verify -Psoak: the soak test, one row per run in test-results/soak-history.md. -->
+        <profile>
+            <id>soak</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes combine.self="override">
+                                <include>**/SoakTest.java</include>
+                            </includes>
+                            <excludes combine.self="override">
+                                <exclude>**/*$*</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

@@ -290,7 +290,7 @@ More sample requests are in [`requests.http`](requests.http), which you can run 
 | `ProdProfileIntegrationTest` *(IT, 3 brokers)* | The prod profile end to end: startup guardrails, security headers, request IDs, rate limiting, strict input, locked-down actuator |
 | `CorsConfigTest` *(IT)* | CORS off by default; configured origins get a preflight answer |
 
-[`TEST_REPORT.md`](TEST_REPORT.md) is a historical record: its live corner cases, soak and shutdown tests were run against the earlier in-memory broker, which has since been removed.
+[`TEST_REPORT.md`](TEST_REPORT.md) is a historical record: its live corner cases, soak and shutdown tests were run against the earlier in-memory broker, which has since been removed. The corner cases and the soak test now run against the Kubernetes deployment as JUnit suites in [`account-upgrade-e2e`](../account-upgrade-e2e/README.md#corner-cases-and-soak).
 
 ## Production notes
 

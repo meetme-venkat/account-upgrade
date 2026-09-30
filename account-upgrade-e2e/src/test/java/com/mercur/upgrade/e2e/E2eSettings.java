@@ -37,7 +37,7 @@ final class E2eSettings {
     private E2eSettings() {
     }
 
-    private static String setting(String property, String environmentVariable, String defaultValue) {
+    static String setting(String property, String environmentVariable, String defaultValue) {
         String value = System.getProperty(property);
         if (value == null || value.isBlank()) {
             value = System.getenv(environmentVariable);

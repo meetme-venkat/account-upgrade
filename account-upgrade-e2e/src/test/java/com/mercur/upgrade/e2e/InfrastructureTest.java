@@ -59,12 +59,7 @@ class InfrastructureTest {
 
     @Test
     void dead_letter_queue_is_empty() {
-        // One line per partition: topic:partition:offset.
-        long deadLetters = Kubectl.kafka("kafka-get-offsets.sh", "--topic", E2eSettings.TOPIC + "-dlq")
-                .lines().filter(line -> !line.isBlank())
-                .mapToLong(line -> Long.parseLong(line.split(":")[2].strip()))
-                .sum();
-        assertThat(deadLetters).isZero();
+        assertThat(Kubectl.deadLetters()).isZero();
     }
 
     @Test
