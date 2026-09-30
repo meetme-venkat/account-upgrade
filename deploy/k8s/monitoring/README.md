@@ -1,4 +1,4 @@
-# Monitoring: Prometheus, Loki and Grafana
+# Monitoring: Prometheus, Loki, Grafana and Splunk
 
 Live metrics, searchable logs and one dashboard for the platform, in the same cluster. Everything here is open source and free; the
 only cost is the cluster capacity it uses.
@@ -9,7 +9,8 @@ only cost is the cluster capacity it uses.
 |---|---|---|---|
 | Prometheus `v3.5.0` | `monitoring` | Scrapes every 15 s, keeps 7 days (at most 4 GB) on a 5 Gi volume | 256 / 768 MiB |
 | Loki `3.5.3` | `monitoring` | Stores the logs of every pod in `account-upgrade` for 7 days on a 5 Gi volume | 256 / 768 MiB |
-| Alloy `v1.10.2` | `monitoring` | Ships those logs to Loki, reading them through the Kubernetes API | 96 / 384 MiB |
+| Alloy `v1.10.2` | `monitoring` | Ships those logs to Loki and Splunk, reading them through the Kubernetes API | 96 / 384 MiB |
+| Splunk Enterprise `10.0.1` | `monitoring` | The same logs, searchable in Splunk, on http://127.0.0.1:8000 (10 Gi volume) | 2 / 4 GiB |
 | Grafana `12.1.1` | `monitoring` | The "Account Upgrade" dashboard and log search, on http://127.0.0.1:3000 | 128 / 384 MiB |
 | kafka-exporter `v1.9.0` | `account-upgrade` | Topic offsets and consumer-group lag | 32 / 96 MiB |
 | postgres-exporter `v0.17.1` | `account-upgrade` | Transactions, connections, rows written | 32 / 96 MiB |
@@ -102,11 +103,63 @@ sum by (level) (rate({app="account-upgrade-backend"}[1m]))                   log
 limits are raised for that (16 MB/s). In production, lowering `EmailChannelImpl`'s logger to WARN would remove
 most of the volume.
 
+## Splunk
+
+Splunk receives the same lines as Loki. Alloy sends them to Splunk's HTTP Event Collector (HEC), inside the cluster.
+
+**Logging in.** Open http://127.0.0.1:8000 and log in as `admin`. The password is in the secret `splunk`:
+
+```sh
+kubectl -n monitoring get secret splunk -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+**Searching**
+
+```
+index=main source=account-upgrade app=account-upgrade-backend level=ERROR          backend errors
+index=main source=account-upgrade requestId=<id>                                    one request, across pods
+index=main source=account-upgrade app=account-upgrade-backend | stats count by level, pod
+index=main source=account-upgrade app=kafka "ERROR"                                  broker errors
+```
+
+**Fields**
+- The Kubernetes labels (`app`, `pod`, `container`, `component`, `level`) are indexed fields.
+- Backend lines have the sourcetype `_json`, so their JSON fields (`requestId`, `log.logger`, `message`, …) are
+  extracted.
+- Other lines are `kube:container` (plain text). Splunk rejects a non-JSON line sent as `_json`.
+
+**Licence.** `splunk.yaml` accepts the Splunk General Terms and licence, as the image requires. It starts as a
+60-day Enterprise trial. After that, switch to the Free licence under Settings → Licensing: it indexes up to 500 MB
+a day and has **no login**, so keep port 8000 on 127.0.0.1.
+
+**Changing the admin password.** Splunk keeps its password in its own configuration on the volume. The secret is
+used for the first setup, and afterwards by the image's startup script to log in, so the two must match:
+
+1. **In Splunk:** change it under Settings → Users → admin.
+2. **In the secret:** set the same password, keeping the HEC token:
+
+   ```sh
+   read -s -p "New Splunk password: " PW; echo
+   kubectl -n monitoring patch secret splunk --type merge -p "{\"stringData\":{\"admin-password\":\"$PW\"}}"
+   unset PW
+   ```
+
+   Avoid `"` and `\` in the password: they would break this JSON.
+
+If the secret changes but Splunk doesn't, Splunk fails to start on its next restart.
+
+**Running as non-root.** The image normally uses sudo to switch users. Here it runs directly as the `splunk` user
+(`restricted` Pod Security):
+- supplementary group 999 owns the image's state directory;
+- `SPLUNK_HOME_OWNERSHIP_ENFORCEMENT=false` skips a `chown` that needs root.
+
 ## On AWS (EKS)
 
 The manifests run unchanged. The software costs nothing, but its infrastructure does:
 
-- **Node capacity:** about 1.5–2.5 GiB of memory and 0.3 vCPU.
+- **Node capacity:** about 1.5–2.5 GiB of memory and 0.3 vCPU, plus 2–4 GiB and 0.5 vCPU for Splunk.
+- **Splunk licence:** Splunk Enterprise beyond the trial or the 500 MB/day Free licence is paid, per GB indexed per day;
+  Splunk Cloud is the managed alternative.
 - **Storage:** EBS volumes for Prometheus and Loki (5 Gi each). Loki is normally pointed at an S3 bucket instead
   (`object_store: s3`), which is cheaper per GB and removes the volume.
 - **Grafana's Service:** change it to `ClusterIP` and use `kubectl port-forward` or an internal ingress. As a
