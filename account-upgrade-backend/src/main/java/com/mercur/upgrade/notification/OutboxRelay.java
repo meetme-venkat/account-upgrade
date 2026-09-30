@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -101,13 +102,37 @@ public class OutboxRelay {
                             rs.getString("body"),
                             rs.getObject("created_at", OffsetDateTime.class).toInstant())))
                     .list();
-            rows.forEach(this::deliver);
+            List<Long> delivered = new ArrayList<>(rows.size());
+            for (OutboxRow row : rows) {
+                if (deliver(row)) {
+                    delivered.add(row.id());
+                }
+            }
+            markSent(delivered);
             return rows.size();
         });
         return claimed == null ? 0 : claimed;
     }
 
-    private void deliver(OutboxRow row) {
+    /** One statement for the whole batch: a round trip per email was most of the relay's time. */
+    private void markSent(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        jdbc.sql("UPDATE notification_outbox SET sent_at = :now, attempts = attempts + 1, last_error = NULL "
+                        + "WHERE id IN (:ids)")
+                .param("now", now())
+                .param("ids", ids)
+                .update();
+        sent.increment(ids.size());
+    }
+
+    /**
+     * Delivers one row. A failure is recorded on the row (attempts, error, next attempt) right away.
+     *
+     * @return whether it was delivered; delivered rows are marked sent together, by {@link #markSent}
+     */
+    private boolean deliver(OutboxRow row) {
         EmailMessage message = row.message();
         try {
             channel.deliver(message, message.eventId() + ":" + message.role());
@@ -128,14 +153,9 @@ public class OutboxRelay {
                 log.warn("Delivery of {} notification for event {} failed (attempt {}), retrying in {}",
                         message.role(), message.eventId(), attempts, backoff, e);
             }
-            return;
+            return false;
         }
-        jdbc.sql("UPDATE notification_outbox SET sent_at = :now, attempts = attempts + 1, last_error = NULL "
-                        + "WHERE id = :id")
-                .param("now", now())
-                .param("id", row.id())
-                .update();
-        sent.increment();
+        return true;
     }
 
     /** 1 s, 2 s, 4 s, ... capped at 5 minutes. */
