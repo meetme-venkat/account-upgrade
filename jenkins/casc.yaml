@@ -31,6 +31,13 @@ jobs:
   - script: |
       pipelineJob('account-upgrade') {
         description('Tests, builds, scans and deploys ${PIPELINE_BRANCH:-main} to the local Kubernetes cluster, then runs the end-to-end tests. Rolls back on failure.')
+        // Also declared in the Jenkinsfile. Declared here too, so the job keeps "Build with Parameters" after this
+        // file re-creates it at a restart, before its next build.
+        parameters {
+          stringParam('COMMIT', '', 'Deploy this commit instead of the latest one (redeploy or roll back). Must contain deploy/k8s.')
+          booleanParam('SKIP_TESTS', false, 'Skip the backend tests (faster manual run).')
+          booleanParam('SKIP_SCAN', false, 'Skip the vulnerability scan (faster manual run).')
+        }
         properties {
           pipelineTriggers {
             triggers {

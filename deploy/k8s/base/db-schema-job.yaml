@@ -1,5 +1,5 @@
 # account-update-db-schema: Liquibase brings the schema up to date, then exits (success = schema current).
-# A Job's pod template cannot change, so deploy.ps1 deletes the previous run's Job and creates it again on every
+# A Job's pod template cannot change, so the pipeline deletes the previous run's Job and creates it again on every
 # deployment (a no-op when the schema is already current), and rolls out the backend only if it succeeds.
 apiVersion: batch/v1
 kind: Job
