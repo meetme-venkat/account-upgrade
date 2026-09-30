@@ -8,6 +8,10 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -41,5 +45,45 @@ public class EventPublisherImpl implements EventPublisher {
         } catch (ExecutionException | TimeoutException e) {
             throw new PublishException("Kafka did not acknowledge event " + event.eventId(), e);
         }
+    }
+
+    /**
+     * Hands every event to the producer first, then waits for the acknowledgements. The producer batches and pipelines
+     * them, so a batch costs a few broker round trips instead of one per event. Per key (partition) order is kept: the
+     * producer is idempotent.
+     */
+    @Override
+    public Map<String, PublishException> publishAll(List<UpgradeRequestedEvent> events) {
+        Map<String, CompletableFuture<?>> sends = new LinkedHashMap<>();
+        Map<String, PublishException> failures = new LinkedHashMap<>();
+        for (UpgradeRequestedEvent event : events) {
+            try {
+                sends.put(event.eventId(), kafkaTemplate.send(topic, event.key(), jsonMapper.writeValueAsString(event)));
+            } catch (RuntimeException e) {
+                // The producer could not take it (e.g. no metadata or a full buffer within max.block.ms).
+                failures.put(event.eventId(), new PublishException("Kafka did not accept event " + event.eventId(), e));
+            }
+        }
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(SEND_TIMEOUT_SECONDS);
+        boolean interrupted = false;
+        for (Map.Entry<String, CompletableFuture<?>> send : sends.entrySet()) {
+            String eventId = send.getKey();
+            if (interrupted) {
+                failures.put(eventId, new PublishException("Interrupted while publishing event " + eventId));
+                continue;
+            }
+            try {
+                send.getValue().get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                interrupted = true;
+                failures.put(eventId, new PublishException("Interrupted while publishing event " + eventId, e));
+            } catch (ExecutionException | TimeoutException e) {
+                failures.put(eventId, new PublishException("Kafka did not acknowledge event " + eventId, e));
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        return failures;
     }
 }
