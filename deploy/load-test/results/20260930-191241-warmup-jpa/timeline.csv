@@ -1,0 +1,11 @@
+seconds,processed,unsent_emails,pg_connections_active,pg_connections_total,top_pods
+1,0,0,1,31,backend-qcblq=28m/348Mi backend-6xt9l=241m/312Mi backend-ldwdv=1982m/316Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=63m/888Mi kafka-1=26m/848Mi kafka-2=19m/860Mi postgres-0=27m/997Mi 
+4,1659,647,6,31,backend-qcblq=28m/348Mi backend-6xt9l=241m/312Mi backend-ldwdv=1982m/316Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=63m/888Mi kafka-1=26m/848Mi kafka-2=19m/860Mi postgres-0=27m/997Mi 
+9,9100,3868,3,21,backend-6xt9l=241m/312Mi backend-ldwdv=1982m/316Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=63m/888Mi kafka-1=26m/848Mi kafka-2=19m/860Mi postgres-0=27m/997Mi 
+14,26057,21312,10,21,backend-6xt9l=3218m/418Mi backend-ldwdv=3180m/416Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=427m/853Mi kafka-1=287m/854Mi kafka-2=282m/882Mi postgres-0=559m/1022Mi 
+19,43224,34003,1,21,backend-6xt9l=3218m/418Mi backend-ldwdv=3180m/416Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=427m/853Mi kafka-1=287m/854Mi kafka-2=282m/882Mi postgres-0=559m/1022Mi 
+25,61772,46663,5,21,backend-6xt9l=3218m/418Mi backend-ldwdv=3180m/416Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=427m/853Mi kafka-1=287m/854Mi kafka-2=282m/882Mi postgres-0=559m/1022Mi 
+31,82910,62102,1,21,backend-6xt9l=4454m/459Mi backend-ldwdv=4471m/447Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=487m/871Mi kafka-1=609m/878Mi kafka-2=563m/907Mi postgres-0=991m/1023Mi 
+37,100000,65196,2,21,backend-6xt9l=4454m/459Mi backend-ldwdv=4471m/447Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=487m/871Mi kafka-1=609m/878Mi kafka-2=563m/907Mi postgres-0=991m/1023Mi 
+41,100000,23216,1,21,backend-6xt9l=4454m/459Mi backend-ldwdv=4471m/447Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=487m/871Mi kafka-1=609m/878Mi kafka-2=563m/907Mi postgres-0=991m/1023Mi 
+45,100000,0,1,21,backend-6xt9l=2389m/448Mi backend-ldwdv=2480m/466Mi frontend-65t4p=1m/13Mi frontend-v5qbk=1m/15Mi kafka-0=238m/878Mi kafka-1=321m/885Mi kafka-2=287m/914Mi postgres-0=978m/1023Mi 

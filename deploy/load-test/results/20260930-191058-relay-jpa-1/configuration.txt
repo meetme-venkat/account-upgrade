@@ -1,0 +1,4 @@
+## Configuration
+backend image: local/account-upgrade-backend:3a9e83c3f4d509f1e9f79cdcbabcb98fbc94543a
+backend replicas: 2
+pending before: 0

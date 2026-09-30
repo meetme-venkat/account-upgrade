@@ -1,0 +1,2 @@
+## Result
+delivered 150000 of 150000 in 14.8 s: 10147 emails/s, attempts > 1: 0
