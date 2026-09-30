@@ -10,22 +10,23 @@ set -eu
 export MSYS_NO_PATHCONV=1
 
 CONTEXT=${KUBE_CONTEXT:-rancher-desktop}
-HERE=$(cd "$(dirname "$0")" && pwd)
 k() { kubectl --context "$CONTEXT" "$@"; }
+# Relative paths from here on: with MSYS_NO_PATHCONV, a Windows kubectl could not open /d/... paths.
+cd "$(dirname "$0")"
 
 k get namespace account-upgrade >/dev/null 2>&1 || {
     echo "Namespace account-upgrade not found: deploy the application first (Jenkins pipeline)." >&2
     exit 1
 }
 
-k apply -f "$HERE/namespace.yaml"
+k apply -f namespace.yaml
 if ! k -n monitoring get secret grafana-admin >/dev/null 2>&1; then
     echo "Creating secret grafana-admin (random admin password)"
     k -n monitoring create secret generic grafana-admin \
         --from-literal=admin-password="$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24)"
 fi
 
-(cd "$HERE" && k kustomize .) | k apply -f -
+k kustomize . | k apply -f -
 # Picks up changes to the scrape configuration (a ConfigMap change alone does not restart the pod).
 k -n monitoring rollout restart deployment/prometheus
 for target in "account-upgrade deployment/kafka-exporter" "account-upgrade deployment/postgres-exporter" \

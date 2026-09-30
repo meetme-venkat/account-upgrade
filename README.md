@@ -56,4 +56,10 @@ Each service documents and enforces its own: [backend](account-upgrade-backend/P
 
 Every push to `main` is tested, built, scanned and deployed to Kubernetes (Rancher Desktop's k3s) by Jenkins, which runs in the same cluster: the pipeline is the [`Jenkinsfile`](Jenkinsfile), the manifests are in [deploy/k8s](deploy/k8s/base), rolled out in order (schema job, backend, frontend) with zero-downtime rolling updates, then checked by the end-to-end tests, with automatic rollback. GitHub checks pull requests and publishes the images to GHCR, but the deployment doesn't depend on it. Setup and operation: [jenkins/README.md](jenkins/README.md) and [deploy/README.md](deploy/README.md).
 
+## Monitoring
+
+Prometheus and Grafana run in the same cluster, with an "Account Upgrade" dashboard: requests, Kafka backlog,
+decisions, emails, database and JVM per pod, at http://127.0.0.1:3000. The backend logs JSON, with a request id per
+line. Install and details: [deploy/k8s/monitoring/README.md](deploy/k8s/monitoring/README.md).
+
 See [the backend README](account-upgrade-backend/README.md) for API details and sample payloads, and [the frontend README](account-upgrade-frontend/README.md) for deployment settings.
