@@ -140,7 +140,9 @@ used for the first setup, and afterwards by the image's startup script to log in
 
    ```sh
    read -s -p "New Splunk password: " PW; echo
-   kubectl -n monitoring patch secret splunk --type merge -p "{\"stringData\":{\"admin-password\":\"$PW\"}}"
+   # Refuses an empty value (e.g. when the prompt was skipped), which would break Splunk's next start.
+   [ -n "$PW" ] && kubectl -n monitoring patch secret splunk --type merge \
+       -p "{\"stringData\":{\"admin-password\":\"$PW\"}}" || echo "Empty password: secret not changed"
    unset PW
    ```
 
