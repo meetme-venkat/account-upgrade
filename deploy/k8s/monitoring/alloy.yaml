@@ -102,21 +102,6 @@ data:
     // Independent of Loki: if Splunk is down, its queue fills and drops, and Loki keeps receiving.
     otelcol.receiver.loki "splunk" {
       output {
-        logs = [otelcol.processor.transform.sourcetype.input]
-      }
-    }
-
-    // Only the backend logs JSON: its lines go in as _json (fields extracted when indexed). Splunk rejects any other
-    // line sent as _json, so the rest (Kafka, PostgreSQL, nginx) goes in as plain text.
-    otelcol.processor.transform "sourcetype" {
-      error_mode = "ignore"
-      log_statements {
-        context    = "log"
-        statements = [
-          `set(attributes["com.splunk.sourcetype"], "_json") where attributes["app"] == "account-upgrade-backend"`,
-        ]
-      }
-      output {
         logs = [otelcol.processor.batch.splunk.input]
       }
     }
@@ -138,7 +123,9 @@ data:
         token      = sys.env("SPLUNK_HEC_TOKEN")
         index      = "main"
         source     = "account-upgrade"
-        // Default for lines without their own sourcetype (see otelcol.processor.transform.sourcetype).
+        // Plain text, for every line: Splunk still extracts the fields of the backend's JSON lines at search time
+        // (AUTO_KV_JSON). Not _json: Splunk parses that when indexing and drops every line that isn't JSON (Kafka,
+        // PostgreSQL, nginx).
         sourcetype = "kube:container"
       }
     }
@@ -148,6 +135,19 @@ data:
         url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
       }
     }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alloy-data
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alloy
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -176,6 +176,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 65534
         runAsGroup: 65534
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -217,7 +218,8 @@ spec:
             - name: config
               mountPath: /etc/alloy
               readOnly: true
-            # Read positions per pod, so a restart resumes instead of re-sending logs.
+            # How far each pod's log has been read, on a volume: a new Alloy pod resumes there. With an emptyDir, every
+            # restart re-sent every running pod's whole log (the 100,000-request soak's lines landed twice in Splunk).
             - name: data
               mountPath: /var/lib/alloy
             - name: tmp
@@ -227,8 +229,8 @@ spec:
           configMap:
             name: alloy-config
         - name: data
-          emptyDir:
-            sizeLimit: 128Mi
+          persistentVolumeClaim:
+            claimName: alloy-data
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi

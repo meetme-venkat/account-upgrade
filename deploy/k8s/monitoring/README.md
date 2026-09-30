@@ -9,7 +9,7 @@ only cost is the cluster capacity it uses.
 |---|---|---|---|
 | Prometheus `v3.5.0` | `monitoring` | Scrapes every 15 s, keeps 7 days (at most 4 GB) on a 5 Gi volume | 256 / 768 MiB |
 | Loki `3.5.3` | `monitoring` | Stores the logs of every pod in `account-upgrade` for 7 days on a 5 Gi volume | 256 / 768 MiB |
-| Alloy `v1.10.2` | `monitoring` | Ships those logs to Loki and Splunk, reading them through the Kubernetes API | 96 / 384 MiB |
+| Alloy `v1.10.2` | `monitoring` | Ships those logs to Loki and Splunk, reading them through the Kubernetes API (1 Gi volume for its read positions) | 96 / 384 MiB |
 | Splunk Enterprise `10.0.1` | `monitoring` | The same logs, searchable in Splunk, on http://127.0.0.1:8000 (10 Gi volume) | 2 / 4 GiB |
 | Grafana `12.1.1` | `monitoring` | The "Account Upgrade" dashboard and log search, on http://127.0.0.1:3000 | 128 / 384 MiB |
 | kafka-exporter `v1.9.0` | `account-upgrade` | Topic offsets and consumer-group lag | 32 / 96 MiB |
@@ -83,8 +83,12 @@ In Kubernetes the backend logs one JSON object per line, in the Elastic Common S
   access to the nodes, and its permissions are a Role in that one namespace: list pods and read their logs.
 - **Labels:** each line is labelled with `namespace`, `app`, `component`, `pod` and `container`. Backend lines also
   get `level` (INFO, WARN, ERROR), so errors can be selected without parsing every line.
-- **Resuming:** Alloy records how far it has read each pod. After a restart it continues from there instead of
-  re-sending.
+- **Resuming:** Alloy records how far it has read each pod on a 1 Gi volume (`alloy-data`). A new Alloy pod
+  continues from there. At most the last few seconds before a restart are sent again (9 lines in a test with two
+  restarts).
+- **First start on an empty volume:** Alloy reads every running pod's log from the beginning. With a throwaway
+  volume (an `emptyDir`, as at first), every restart re-sent everything, which doubled a 100,000-request soak run
+  in Splunk.
 
 **Searching.** In Grafana, open **Explore**, choose **Loki**, then query:
 
@@ -124,9 +128,9 @@ index=main source=account-upgrade app=kafka "ERROR"                             
 
 **Fields**
 - The Kubernetes labels (`app`, `pod`, `container`, `component`, `level`) are indexed fields.
-- Backend lines have the sourcetype `_json`, so their JSON fields (`requestId`, `log.logger`, `message`, …) are
-  extracted.
-- Other lines are `kube:container` (plain text). Splunk rejects a non-JSON line sent as `_json`.
+- Every line has the sourcetype `kube:container` (plain text). Splunk still extracts the backend's JSON fields
+  (`requestId`, `log.logger`, `message`, …) at search time.
+- Not `_json`: Splunk parses that when indexing, and drops every line that isn't JSON (Kafka, PostgreSQL, nginx).
 
 **Licence.** `splunk.yaml` accepts the Splunk General Terms and licence, as the image requires. It starts as a
 60-day Enterprise trial. After that, switch to the Free licence under Settings → Licensing: it indexes up to 500 MB
