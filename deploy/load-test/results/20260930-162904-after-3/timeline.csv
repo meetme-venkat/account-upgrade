@@ -1,0 +1,5 @@
+seconds,processed,unsent_emails,pg_connections_active,pg_connections_total,top_pods
+0,0,0,1,21,backend-2p4m2=21m/310Mi backend-qt2w9=11m/308Mi frontend-fwcrq=1m/13Mi frontend-zncq8=1m/15Mi kafka-0=19m/501Mi kafka-1=23m/503Mi kafka-2=39m/516Mi postgres-0=15m/241Mi 
+3,741,243,1,21,backend-2p4m2=21m/310Mi backend-qt2w9=11m/308Mi frontend-fwcrq=1m/13Mi frontend-zncq8=1m/15Mi kafka-0=19m/501Mi kafka-1=23m/503Mi kafka-2=39m/516Mi postgres-0=15m/241Mi 
+8,6602,870,6,21,backend-2p4m2=591m/318Mi backend-qt2w9=587m/320Mi frontend-fwcrq=1m/13Mi frontend-zncq8=1m/15Mi kafka-0=371m/523Mi kafka-1=164m/528Mi kafka-2=212m/540Mi postgres-0=90m/244Mi 
+11,10000,0,1,21,backend-2p4m2=591m/318Mi backend-qt2w9=587m/320Mi frontend-fwcrq=1m/13Mi frontend-zncq8=1m/15Mi kafka-0=371m/523Mi kafka-1=164m/528Mi kafka-2=212m/540Mi postgres-0=90m/244Mi 

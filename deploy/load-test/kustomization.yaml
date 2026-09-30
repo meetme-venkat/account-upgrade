@@ -1,0 +1,16 @@
+# The peak load test (k6), run on demand; not part of the deployment. See README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: account-upgrade
+
+resources:
+  - job.yaml
+
+configMapGenerator:
+  - name: peak-load-script
+    files:
+      - peak.js
+    options:
+      labels:
+        app.kubernetes.io/component: load-test

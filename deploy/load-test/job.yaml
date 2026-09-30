@@ -1,0 +1,53 @@
+# The peak load Job: k6 inside the cluster, against the backend Service. __RUN_ID__ is replaced at apply time with a
+# unique id (see README.md), which prefixes every user id of the run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: peak-load
+  labels:
+    app.kubernetes.io/name: peak-load
+    app.kubernetes.io/component: load-test
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: peak-load
+        app.kubernetes.io/component: load-test
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: k6
+          image: grafana/k6:2.3.0
+          args: ["run", "--quiet", "/scripts/peak.js"]
+          env:
+            - name: RUN_ID
+              value: "__RUN_ID__"
+            - name: REQUESTS
+              value: "__REQUESTS__"
+            - name: VUS
+              value: "200"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: peak-load-script

@@ -78,9 +78,14 @@ spec:
               value: "3"
             - name: UPGRADE_MESSAGING_KAFKA_MIN_INSYNC_REPLICAS
               value: "2"
-            # Partitions (4) >= replicas (2) x consumer concurrency, or some consumers sit idle.
+            # Partitions >= replicas (2) x consumer concurrency, or some consumers sit idle; and consumer concurrency
+            # < the connection pool (10 per pod), or consumers wait for connections. Partitions can only grow: raise
+            # them while the topic's backlog is empty (a user's events move to another partition). See
+            # deploy/load-test/README.md for the measurements behind these values.
+            - name: UPGRADE_MESSAGING_PARTITIONS
+              value: "8"
             - name: UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY
-              value: "2"
+              value: "4"
             - name: UPGRADE_SECURITY_JWT_SECRET
               valueFrom:
                 secretKeyRef:

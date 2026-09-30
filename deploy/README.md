@@ -103,7 +103,7 @@ Deploying, rolling back and the build history are in Jenkins ([jenkins/README.md
 |---|---|
 | See what's running | `kubectl -n account-upgrade get pods,svc,jobs` |
 | Logs | `kubectl -n account-upgrade logs -l app.kubernetes.io/component=backend --prefix -f` |
-| Scale | `kubectl -n account-upgrade scale deployment/account-upgrade-backend --replicas 3` (until the next deployment; change `k8s/base/backend.yaml` to keep it. Keep partitions (4) >= replicas × `UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY`) |
+| Scale | `kubectl -n account-upgrade scale deployment/account-upgrade-backend --replicas 3` (until the next deployment; change `k8s/base/backend.yaml` to keep it. Keep partitions (8, `UPGRADE_MESSAGING_PARTITIONS`) >= replicas × `UPGRADE_MESSAGING_KAFKA_CONSUMER_CONCURRENCY` (4), and the concurrency below the connection pool (10 per pod); see [load-test](load-test/README.md)) |
 | Connect to PostgreSQL from the host | `kubectl -n account-upgrade port-forward svc/postgres 5433:5432`, then `127.0.0.1:5433`, user `postgres`, the password from the secret |
 | Check the deployment end to end, from the host | `cd account-upgrade-e2e; .\mvnw.cmd verify`: 45 JUnit checks, including the rate limit the pipeline leaves out. See [its README](../account-upgrade-e2e/README.md) |
 | Remove the deployment | `kubectl delete namespace account-upgrade` (deletes the data volumes too) |
