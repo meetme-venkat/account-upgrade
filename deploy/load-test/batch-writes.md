@@ -100,9 +100,10 @@ Same test as before ([README.md](README.md)): k6 in the cluster, 200 concurrent 
 
 The first run on the batching build (`100k-batched-tx-1`, before the relay fix):
 
-- **Decisions were fast:** all 100,000 made about 27 s after the first request.
+- **Decisions were fast:** the last of 100,000 was made 25.6 s after the first request.
 - **Emails stalled:** 97,760 unsent after one minute, and **57,280 still unsent after 9 minutes**, a drain rate of
-  ~84 emails/s. The run was stopped there; its folder has a timeline but no result.
+  ~84 emails/s. The last email went out at **840.8 s**, only after the relay fix below was deployed (its
+  `result.txt`).
 
 **Cause.** The relay (`OutboxRelay`) claims the oldest due emails with `ORDER BY id LIMIT 20`.
 
