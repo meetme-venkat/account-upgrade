@@ -14,3 +14,4 @@ Rows are appended by `SoakTest` (`account-upgrade-e2e`, `mvnw verify -Psoak`), o
 | 2026-09-30 13:04 | 100000 | 100000 | 0 | 100000 | 0 | 59179 | 0 | 103.5 | 966 | 35/35 -> 35/35 | 62/57 | default size, after publishing batches together |
 | 2026-09-30 19:49 | 100000 | 100000 | 0 | 100000 | 0 | 21999 | 0 | 9.9 | 10098 | 43/43 -> 43/43 | 112/106 | JPA/Hibernate build (4e75bdf), default size |
 | 2026-09-30 20:11 | 30000 | 30000 | 0 | 30000 | 0 | 8990 | 0 | 5.7 | 5268 | 43/43 -> 43/43 | 104/128 | traffic for the Grafana dashboard check |
+| 2026-09-30 22:07 | 100000 | 100000 | 0 | 100000 | 0 | 13286 | 0 | 12.2 | 8205 | 43/41 -> 43/41 | 112/115 | with Loki and Splunk shipping logs |
