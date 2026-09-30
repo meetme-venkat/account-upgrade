@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Turns inbound requests into {@link UpgradeRequestedEvent}s and publishes them.
@@ -52,21 +53,28 @@ public class IngestionService {
     }
 
     /**
-     * Publishes every request of a batch. A broker failure for one request does not abort
-     * the rest of the batch; it is reported in that request's receipt instead.
+     * Publishes every request of a batch, all at once (one broker acknowledgement per item would make a batch as slow
+     * as that many real-time requests). A broker failure for one request does not abort the rest of the batch; it is
+     * reported in that request's receipt instead.
      *
      * @param idempotencyKey optional client key for the whole batch; {@code null} for none
      */
     public BatchIngestionResponse ingestBatch(List<UpgradeRequest> requests, String idempotencyKey) {
-        List<IngestionReceipt> receipts = new ArrayList<>(requests.size());
+        List<UpgradeRequestedEvent> events = new ArrayList<>(requests.size());
         for (int i = 0; i < requests.size(); i++) {
-            UpgradeRequest request = requests.get(i);
             String itemKey = idempotencyKey == null ? null : idempotencyKey + ":" + i;
-            try {
-                receipts.add(publish(newEvent(request, RequestSource.BATCH, itemKey)));
-            } catch (PublishException e) {
-                log.warn("Batch item for user {} rejected: {}", request.userId(), e.getMessage());
-                receipts.add(IngestionReceipt.rejected(request.userId(), RequestSource.BATCH, e.getMessage()));
+            events.add(newEvent(requests.get(i), RequestSource.BATCH, itemKey));
+        }
+        Map<String, PublishException> failures = publisher.publishAll(events);
+        List<IngestionReceipt> receipts = new ArrayList<>(events.size());
+        for (UpgradeRequestedEvent event : events) {
+            String userId = event.request().userId();
+            PublishException failure = failures.get(event.eventId());
+            if (failure == null) {
+                receipts.add(IngestionReceipt.accepted(userId, event.eventId(), RequestSource.BATCH));
+            } else {
+                log.warn("Batch item for user {} rejected: {}", userId, failure.getMessage());
+                receipts.add(IngestionReceipt.rejected(userId, RequestSource.BATCH, failure.getMessage()));
             }
         }
         return BatchIngestionResponse.of(receipts);
