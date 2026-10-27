@@ -19,7 +19,7 @@ COPY . .
 RUN npm run test:ci && npx ng build --configuration production
 
 # Runs as uid 101, listens on 8080; no root at runtime.
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 ENV BACKEND_URL=http://account-upgrade-backend:8080 \
     API_BASE_URL="" \
     POLL_INTERVAL_MS=3000 \
